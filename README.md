@@ -1,13 +1,13 @@
-# Atlas for OpenWrt
+# Atlas for OpenWrt 24.10.1+
 
-Atlas 0.21 beta: per-source permission for private list servers and local symlinks, URL query support, extensionless lists, repeatable router configuration benchmark.
+[Atlas 0.22 beta — packages and source](https://github.com/Nissanstels1/Atlas/releases/tag/v0.22.0-beta)
 
-[Release and tested packages](https://github.com/Nissanstels1/Atlas/releases/tag/v0.21.0-beta)
+Полные JSON ruleset без упрощения logical AND/OR, regex, ports и invert: проверка установленным sing-box перед заменой, импорт из интерфейса и восстановление файлов из резервной копии. До трёх попыток сетевой загрузки. Сняты отдельные лимиты количества источников, правил и интерфейсов; размер файла регулируется, включая 0 без лимита. Поддержаны query/fragment, extensionless и абсолютные пути с ../, разрешения частных адресов и symlink.
 
-Requires OpenWrt 24.10.1 or newer. Use IPK with opkg and APK with apk. APK is unsigned and needs an explicit --allow-untrusted installation option. Source and test coverage are in the release ZIP.
+Linux: 260 проверок успешно, 11 пропущено (sing-box 1.12.17). Windows: 256 успешно, 15 пропущено. Интерфейс Chrome и мобильная ширина проверены. В виртуальной OpenWrt 25.12.0 с sing-box 1.13.21 проверены загрузка/импорт/восстановление JSON, запуск/остановка службы и раздельная маршрутизация реальных IPv4/IPv6 пакетов на двух интерфейсах с одинаковыми адресами клиентов.
 
-Windows: 248 passed / 15 skipped. Linux: 252 passed / 11 skipped. Real symlink and private HTTP source tests passed. 100-section configuration passed 20 sing-box 1.12.17 checks in a local Linux VM. Physical-router throughput, long-term stability and superiority over Podkop on every parameter are not yet demonstrated.
+Сравнительный реестр содержит 50 общих возможностей и 20 дополнительных встроенных сценариев Atlas, не найденных в проверенном Podkop 0.7.22. Это не доказательство исчерпывающего паритета или превосходства во всех параметрах. Сохраняются пределы RPC, 16 МиБ импорта резервной копии, 64 КиБ загрузки файла из браузера и отдельные ограничения удалённых профилей. Большие списки подключаются по URL/file:///. Индивидуальный DNS resolver секции нельзя ограничить портами/транспортом; внешние detour между независимыми секциями ограничены моделью графа.
 
-Primary endpoint: GitHub Releases. Alternate endpoint: raw.githubusercontent.com/Nissanstels1/Atlas/main/mirror/v0.21.0-beta/. These endpoints use the same hosting provider and are not independent hosting.
+Скорость, RAM и длительная стабильность на одинаковом физическом роутере не измерены. Пакетный IPv6-тест в VM подтверждает выбор маршрута, а не доставку через интернет.
 
-Previous releases remain available.
+IPK предназначен для opkg, APK — для apk. APK не подписан публичным ключом; ознакомьтесь с контрольными суммами и инструкцией установки. GitHub Releases и raw.githubusercontent.com используют одного провайдера.
