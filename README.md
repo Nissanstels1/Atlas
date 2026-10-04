@@ -1,5 +1,15 @@
-# Atlas for OpenWrt
+# Atlas 0.19 beta для OpenWrt
 
-Atlas targets OpenWrt 24.10.1 and newer. Release packages and complete source archives are published in this repository's Releases.
+OpenWrt 24.10.1 и новее. IPK для opkg, APK для apk; APK требует явного `--allow-untrusted`.
 
-Version 0.19 beta is undergoing final native OpenWrt validation before publication. APK packages require an explicit --allow-untrusted override because they are not signed by an OpenWrt feed key.
+[Пакеты и полный архив исходников](https://github.com/Nissanstels1/Atlas/releases/tag/v0.19.0-beta).
+
+По проверенному реестру 70 сценариев: 50 общих с Podkop 0.7.22 и 20 дополнительных. Таблица с указателями на реализацию, тесты и ограничения находятся в архиве исходников. Это не исчерпывающее доказательство всех возможностей Podkop или превосходства по производительности.
+
+Реализованы точные входные интерфейсы с отдельными TUN и правилами iif, HTTP-списки, собственные локальные пути, снятие лимита 256 секций и подробная диагностика nftables. На виртуальной OpenWrt проверены реальные UDP-пакеты с одинаковыми адресами на двух входах, штатная служба, HTTP-загрузка и очистка firewall. Физический роутер ещё не испытан.
+
+Основной HTTPS-адрес установщика: `https://github.com/Nissanstels1/Atlas/releases/download/v0.19.0-beta/`.
+
+Альтернативный адрес: `https://raw.githubusercontent.com/Nissanstels1/Atlas/main/mirror/v0.19.0-beta/`. Это другой endpoint того же провайдера GitHub, а не независимый хостинг. Установщик `install-release.sh` проверяет SHA256SUMS и подходит обоим адресам.
+
+Полный исходный код, лицензии, сборка и документация находятся в `releases/atlas-openwrt-0.19.0-beta.zip`; никаких ключей сборочных виртуальных машин в нём нет. Workflow публикует уже проверенные пакеты из архива и синхронизирует альтернативный адрес.
