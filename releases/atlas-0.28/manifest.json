@@ -1,0 +1,79 @@
+{
+  "version": "0.28.0",
+  "name": "atlas-0.28-complete-x86_64.zip",
+  "sha256": "d1e5e15663972ddbe5f724ac39958bd02321be4dd924e98331347c9e6cf3562b",
+  "parts": [
+    {
+      "name": "part-000.bin",
+      "size": 4194304,
+      "sha256": "d20403b79e519b61f2b9d32d8cc1cfc4d4610567d3c575b7fc1904a9d5b81ec2",
+      "git_sha": "9e7fea52e35e628274e325e866274d7f3acfbfee"
+    },
+    {
+      "name": "part-001.bin",
+      "size": 4194304,
+      "sha256": "2dc65b20c9811725bf993c2acec9380f497e6c57d1a114898dbf1f28e939c7d5",
+      "git_sha": "91cf33863c27f0f4c02cd300567f28c668b22103"
+    },
+    {
+      "name": "part-002.bin",
+      "size": 4194304,
+      "sha256": "679c06c05688468f514b440d4cf6138f94600f91ecea7a2911f3efc53aae3125",
+      "git_sha": "54e36d7d00662b4fa592a526e62bdd196e036028"
+    },
+    {
+      "name": "part-003.bin",
+      "size": 4194304,
+      "sha256": "d61d3f536e0077aeb5f812dff673e7fc8ee2bf3df1c5af8eb6805f1f35fc84f6",
+      "git_sha": "770e19aacf530aec51de44841758c24d39db1596"
+    },
+    {
+      "name": "part-004.bin",
+      "size": 4194304,
+      "sha256": "ea223c5c92f0c3a72d83ee5241f24c09ccc98282bb1338dbb371e1312f0b548e",
+      "git_sha": "45c8d5562b9158ca434428426ef82163d93354ff"
+    },
+    {
+      "name": "part-005.bin",
+      "size": 4194304,
+      "sha256": "5599b50ceec015bd7664b707f2d3ba062a22f0e17decdf0f03342eb54fa86bc6",
+      "git_sha": "508fac420c77c2555bb471387712b10cda77c5eb"
+    },
+    {
+      "name": "part-006.bin",
+      "size": 4194304,
+      "sha256": "624db1a45c6b37525e2d24c400135bc861c2275065aed6fd9c70c46d4aeeb060",
+      "git_sha": "41c7821604ef1692afbc7a897b0ca408e446b665"
+    },
+    {
+      "name": "part-007.bin",
+      "size": 4194304,
+      "sha256": "fe199b19038805fbd24da5e851b77ed636bc6452f106883b10c9a75e6c26b6f4",
+      "git_sha": "f7e5f273f0372264f08eb3871f7826ffbcb4d889"
+    },
+    {
+      "name": "part-008.bin",
+      "size": 4194304,
+      "sha256": "f2bb8802ff79ebefecf37dfe326aafd86043fdae4afd9fb21ab94ba4dd9e1abe",
+      "git_sha": "91d07004d00fefc7c0e6850daa570041e25998ef"
+    },
+    {
+      "name": "part-009.bin",
+      "size": 4194304,
+      "sha256": "465fd44f8cd7e8403231e268a2412ab55eada2d4a602b5fd135e014a25d167ba",
+      "git_sha": "8efa7702cdf717a2f77d7dcaf7ab7bf43f03bf22"
+    },
+    {
+      "name": "part-010.bin",
+      "size": 4194304,
+      "sha256": "3e5371ab60f3d4d0cece55bf7f387643aa5a4e75751f221487ab86abd09e69b9",
+      "git_sha": "409f812c36158187240ab73b2b9116759705de3f"
+    },
+    {
+      "name": "part-011.bin",
+      "size": 24188,
+      "sha256": "a9af51c705abc4e526fe6dac049468f64387fa11d5ce9b0871442031e7cea9f4",
+      "git_sha": "4f4d5a6e56a0dcd54d7b222b95263ea76a996ca1"
+    }
+  ]
+}

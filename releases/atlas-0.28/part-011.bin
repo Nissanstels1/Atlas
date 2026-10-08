@@ -1,0 +1,146 @@
+eatures.test_adguard_filter_uses_encrypted_dns_through_proxy) ... ok
+test_blocked_domains_are_rejected_before_fakeip (test_privacy.PrivacyFeatures.test_blocked_domains_are_rejected_before_fakeip) ... ok
+test_custom_encrypted_dns_and_client_doh_restriction (test_privacy.PrivacyFeatures.test_custom_encrypted_dns_and_client_doh_restriction) ... ok
+test_default_secure_dns_without_fakeip_or_ad_filter (test_privacy.PrivacyFeatures.test_default_secure_dns_without_fakeip_or_ad_filter) ... ok
+test_external_ip_test_handles_equal_address_and_failure (test_privacy.PrivacyFeatures.test_external_ip_test_handles_equal_address_and_failure) ... ok
+test_external_ip_test_reports_only_difference_not_addresses (test_privacy.PrivacyFeatures.test_external_ip_test_reports_only_difference_not_addresses) ... ok
+test_fakeip_covers_all_names_only_in_global_mode (test_privacy.PrivacyFeatures.test_fakeip_covers_all_names_only_in_global_mode) ... ok
+test_fakeip_is_warned_when_proxy_domain_list_is_empty (test_privacy.PrivacyFeatures.test_fakeip_is_warned_when_proxy_domain_list_is_empty) ... ok
+test_privacy_audit_checks_dns_and_full_routing (test_privacy.PrivacyFeatures.test_privacy_audit_checks_dns_and_full_routing) ... ok
+test_real_ip_resolution_uses_secure_dns_not_fakeip (test_privacy.PrivacyFeatures.test_real_ip_resolution_uses_secure_dns_not_fakeip) ... ok
+test_router_selftest_separately_checks_config_dns_api_tun_and_https (test_privacy.PrivacyFeatures.test_router_selftest_separately_checks_config_dns_api_tun_and_https) ... ok
+test_expands_copy_of_ext4_root_partition_and_preserves_source (test_qemu_expand.ExpandOpenWrtImage.test_expands_copy_of_ext4_root_partition_and_preserves_source) ... ok
+test_auto_policy_sees_cloned_member_keys (test_recovery_uot.RecoveryUot.test_auto_policy_sees_cloned_member_keys) ... ok
+test_burst_updates_queue_without_spawning_while_gate_owned (test_recovery_uot.RecoveryUot.test_burst_updates_queue_without_spawning_while_gate_owned) ... ok
+test_empty_pool_with_remote_rules_has_useful_error (test_recovery_uot.RecoveryUot.test_empty_pool_with_remote_rules_has_useful_error) ... ok
+test_old_client_preserves_udp_over_tcp_override (test_recovery_uot.RecoveryUot.test_old_client_preserves_udp_over_tcp_override) ... ok
+test_section_uot_nodes_are_independent_and_selectable (test_recovery_uot.RecoveryUot.test_section_uot_nodes_are_independent_and_selectable) ... ok
+test_two_recovery_requests_restart_once (test_recovery_uot.RecoveryUot.test_two_recovery_requests_restart_once) ... ok
+test_uot_validation (test_recovery_uot.RecoveryUot.test_uot_validation) ... ok
+test_user_control_tag_is_preserved_and_generated_wrapper_is_unique (test_recovery_uot.RecoveryUot.test_user_control_tag_is_preserved_and_generated_wrapper_is_unique) ... ok
+test_other_revision_apk_is_not_shipped (test_release.ReleaseBundle.test_other_revision_apk_is_not_shipped) ... ok
+test_release_checksums_match_both_deliverables (test_release.ReleaseBundle.test_release_checksums_match_both_deliverables) ... ok
+test_source_bundle_contains_parser_license_tests_and_package (test_release.ReleaseBundle.test_source_bundle_contains_parser_license_tests_and_package) ... ok
+test_ambiguous_sdk_is_rejected (test_sdk_tools.SDKManifest.test_ambiguous_sdk_is_rejected) ... ok
+test_manifest_hash_is_for_exact_filename (test_sdk_tools.SDKManifest.test_manifest_hash_is_for_exact_filename) ... ok
+test_sdk_name_matches_verified_official_24101_index (test_sdk_tools.SDKManifest.test_sdk_name_matches_verified_official_24101_index) ... ok
+test_cross_section_or_unknown_member_is_rejected (test_section_controls.Controls.test_cross_section_or_unknown_member_is_rejected) ... ok
+test_dashboard_and_delay_do_not_return_credentials (test_section_controls.Controls.test_dashboard_and_delay_do_not_return_credentials) ... ok
+test_file_list_paths_reject_traversal_and_remote_authority (test_section_controls.Controls.test_file_list_paths_reject_traversal_and_remote_authority) ... ok
+test_lists_and_fetch_use_exact_independent_target (test_section_controls.Controls.test_lists_and_fetch_use_exact_independent_target) ... ok
+test_missing_disabled_and_block_section_for_list_are_rejected (test_section_controls.Controls.test_missing_disabled_and_block_section_for_list_are_rejected) ... ok
+test_root_urltest_has_manual_control_and_persistent_choice (test_section_controls.Controls.test_root_urltest_has_manual_control_and_persistent_choice) ... ok
+test_udp_bootstrap_has_no_tls (test_section_controls.Controls.test_udp_bootstrap_has_no_tls) ... ok
+test_wan_api_requires_explicit_permission_and_secret (test_section_controls.Controls.test_wan_api_requires_explicit_permission_and_secret) ... ok
+test_list_fetch_manual_switch_and_udp_schema (test_section_engine.EngineControls.test_list_fetch_manual_switch_and_udp_schema) ... ok
+test_scoped_exclusions_with_dns_fakeip_and_assigned_list_schema (test_section_engine.EngineControls.test_scoped_exclusions_with_dns_fakeip_and_assigned_list_schema) ... ok
+test_dns_resolver_and_port_transport_scope_are_independent (test_section_links.SectionLinks.test_dns_resolver_and_port_transport_scope_are_independent) ... ok
+test_expert_selector_can_reference_existing_profile (test_section_links.SectionLinks.test_expert_selector_can_reference_existing_profile) ... ok
+test_forward_link_between_sections_is_preserved (test_section_links.SectionLinks.test_forward_link_between_sections_is_preserved) ... ok
+test_large_graph_chain_avoids_python_recursion_limit (test_section_links.SectionLinks.test_large_graph_chain_avoids_python_recursion_limit) ... ok
+test_missing_disabled_and_cross_section_cycles_fail_closed (test_section_links.SectionLinks.test_missing_disabled_and_cross_section_cycles_fail_closed) ... ok
+test_unlimited_active_pool_accepts_more_than_1024_profiles (test_section_links.SectionLinks.test_unlimited_active_pool_accepts_more_than_1024_profiles) ... ok
+test_auto_intervals_tolerance_and_connection_policy (test_selection.AutoSelection.test_auto_intervals_tolerance_and_connection_policy) ... ok
+test_auto_selection_requires_recent_engine_measurements (test_selection.AutoSelection.test_auto_selection_requires_recent_engine_measurements) ... ok
+test_bad_filter_parameters (test_selection.AutoSelection.test_bad_filter_parameters) ... ok
+test_country_exclusion_removes_nodes_before_outbound_generation (test_selection.AutoSelection.test_country_exclusion_removes_nodes_before_outbound_generation) ... ok
+test_country_recognition_is_label_only (test_selection.AutoSelection.test_country_recognition_is_label_only) ... ok
+test_disabled_subscription_not_candidate (test_selection.AutoSelection.test_disabled_subscription_not_candidate) ... ok
+test_estonia_only_restricts_engine_outbounds (test_selection.AutoSelection.test_estonia_only_restricts_engine_outbounds) ... ok
+test_exclusion_wins (test_selection.AutoSelection.test_exclusion_wins) ... ok
+test_legacy_settings_migrate_without_network_side_effects (test_selection.AutoSelection.test_legacy_settings_migrate_without_network_side_effects) ... ok
+test_local_api_requires_secret_and_loopback (test_selection.AutoSelection.test_local_api_requires_secret_and_loopback) ... ok
+test_manual_selection_cannot_escape_country_filter (test_selection.AutoSelection.test_manual_selection_cannot_escape_country_filter) ... ok
+test_multiple_countries_or (test_selection.AutoSelection.test_multiple_countries_or) ... ok
+test_name_filter_literal_not_regex (test_selection.AutoSelection.test_name_filter_literal_not_regex) ... ok
+test_preferred_country_order_and_ping_scoring (test_selection.AutoSelection.test_preferred_country_order_and_ping_scoring) ... ok
+test_protocol_filter_and_country_are_combined (test_selection.AutoSelection.test_protocol_filter_and_country_are_combined) ... ok
+test_reserves_cannot_escape_staleness_or_ping_limits (test_selection.AutoSelection.test_reserves_cannot_escape_staleness_or_ping_limits) ... ok
+test_reserves_follow_order_and_return_to_qualifying_primary (test_selection.AutoSelection.test_reserves_follow_order_and_return_to_qualifying_primary) ... ok
+test_unknown_country_no_silent_fallback (test_selection.AutoSelection.test_unknown_country_no_silent_fallback) ... ok
+test_actual_auto_choice_and_measurement (test_selection.RuntimeObservation.test_actual_auto_choice_and_measurement) ... ok
+test_cycle_rejected (test_selection.RuntimeObservation.test_cycle_rejected) ... ok
+test_direct_is_not_successful_proxy (test_selection.RuntimeObservation.test_direct_is_not_successful_proxy) ... ok
+test_manual_mode_not_reported_as_auto (test_selection.RuntimeObservation.test_manual_mode_not_reported_as_auto) ... ok
+test_no_fabricated_choice_when_api_has_none (test_selection.RuntimeObservation.test_no_fabricated_choice_when_api_has_none) ... ok
+test_stopped_engine_does_not_report_old_choice (test_selection.RuntimeObservation.test_stopped_engine_does_not_report_old_choice) ... ok
+test_switch_is_reported_only_after_engine_changes (test_selection.RuntimeObservation.test_switch_is_reported_only_after_engine_changes) ... ok
+test_controller_secret_persistent_private_and_not_in_status (test_selection.SavedFilters.test_controller_secret_persistent_private_and_not_in_status) ... ok
+test_custom_auto_choice_changes_only_loopback_selector (test_selection.SavedFilters.test_custom_auto_choice_changes_only_loopback_selector) ... ok
+test_estonia_filter_roundtrip_and_eligible_flags (test_selection.SavedFilters.test_estonia_filter_roundtrip_and_eligible_flags) ... ok
+test_filtered_runtime_config_accepted_by_engine (test_selection.SavedFilters.test_filtered_runtime_config_accepted_by_engine) ... ok
+test_impossible_filter_does_not_destroy_saved_settings (test_selection.SavedFilters.test_impossible_filter_does_not_destroy_saved_settings) ... ok
+test_interface_restore_restarts_only_once_for_ifup (test_selection.SavedFilters.test_interface_restore_restarts_only_once_for_ifup) ... ok
+test_netifd_events_are_limited_to_configured_logical_interfaces (test_selection.SavedFilters.test_netifd_events_are_limited_to_configured_logical_interfaces) ... ok
+test_private_section_reserve_order_is_independent_of_global_order (test_selection.SavedFilters.test_private_section_reserve_order_is_independent_of_global_order) ... ok
+test_runtime_http_failure_not_marked_connected (test_selection.SavedFilters.test_runtime_http_failure_not_marked_connected) ... ok
+test_watchdog_limits_restarts_to_three_per_ten_minutes (test_selection.SavedFilters.test_watchdog_limits_restarts_to_three_per_ten_minutes) ... ok
+test_watchdog_recovers_enabled_service_after_valid_config_check (test_selection.SavedFilters.test_watchdog_recovers_enabled_service_after_valid_config_check) ... ok
+test_delay_test_visits_every_node_of_maximum_pool (test_selection_recheck.SelectionRecheck.test_delay_test_visits_every_node_of_maximum_pool) ... ok
+test_failed_first_group_does_not_skip_next_and_reports_partial_result (test_selection_recheck.SelectionRecheck.test_failed_first_group_does_not_skip_next_and_reports_partial_result) ... ok
+test_freshness_uses_each_section_interval_in_both_directions (test_selection_recheck.SelectionRecheck.test_freshness_uses_each_section_interval_in_both_directions) ... ok
+test_actual_symlink_file_and_parent_and_scheduler_target_change (test_source_permissions.SourcePermissions.test_actual_symlink_file_and_parent_and_scheduler_target_change) ... ok
+test_benchmark_report_is_repeatable_and_does_not_expose_secrets (test_source_permissions.SourcePermissions.test_benchmark_report_is_repeatable_and_does_not_expose_secrets) ... ok
+test_private_flags_are_validated_and_preserved (test_source_permissions.SourcePermissions.test_private_flags_are_validated_and_preserved) ... ok
+test_real_private_http_download_requires_permission (test_source_permissions.SourcePermissions.test_real_private_http_download_requires_permission) ... ok
+test_redirect_uses_same_private_permission (test_source_permissions.SourcePermissions.test_redirect_uses_same_private_permission) ... ok
+
+----------------------------------------------------------------------
+Ran 350 tests in 161.406s
+
+OK
+NATIVE: idle URLTest unchanged by default; background measurements renewed past idle_timeout, reserve selected on failure, primary restored without URLTest traffic
+NATIVE: HTTPS certificate validated; 16 KiB truncation rejected; 64 KiB reserve passed before real selector switch; wrong hostname, groups and HTTP URLs rejected
+PK     O�H]�q��   �      Atlas-0.28-browser-tests.txtPASS: browser section exceptions, cloning, preview/validation, route explanation, autostart, existing settings, desktop/mobile. Router RPC was mocked.
+PK     ��G]��-��"  �"     Atlas-0.27-report.md# Atlas 0.27.0 beta
+
+Реализованы четыре пробела, найденные при сравнении с Podkop 0.7.23:
+
+- Упорядоченный резервный набор URLTest для общего пула и отдельных секций. Резерв используется только при недоступности основных серверов; после восстановления группа возвращается к основным. Резервные профили выбираются из импортированных источников; ссылки предварительно импортируются в менеджере профилей.
+- Проверка скачивания 64 КиБ перед переключением: настройка движка по умолчанию, выключение или собственный HTTPS URL. Проверка выполняется расширенным движком, а не таймером LuCI.
+- Импорт VLESS/Trojan xhttp и splithttp, включая исходное URL-кодирование extra. Ссылку разбирает движок; результат проходит нормализацию и проверку конфигурации перед применением.
+- Определение Features установленного движка. Неподдерживаемые настройки не применяются молча; интерфейс показывает возможности и отключает добавление неподдерживаемых опций.
+
+## Движок
+
+Готовый podkop-engine и podkop-engine-full не содержат TUN. Atlas использует TUN, поэтому собран отдельный **atlas-engine 1.13.21-r1** с TUN и расширениями URLTest/XHTTP. Он основан на SagerNet sing-box v1.13.21 и серии из 86 патчей FiyeroT/podkop-engine v1.13.21-r12. Сборка не связана с авторами исходных проектов; лицензия GPL-3.0-or-later. Сохраняются исходники, лицензии, зависимости и рецепт сборки.
+
+Движок устанавливается отдельно в `/usr/lib/atlas-engine/bin/atlas-engine`, без замены `/usr/bin/sing-box` и без дополнительной фоновой службы. Atlas выбирает его при наличии; после установки примените настройки или перезапустите Atlas. Штатный sing-box остаётся необходимой зависимостью основного пакета и резервным вариантом после удаления дополнительного движка. Для возвращения к штатному движку сначала очистите расширенные параметры и xhttp-профили. Повторный запуск с несовместимой конфигурацией будет отклонён.
+
+Готовые пакеты дополнительного движка предназначены **только для OpenWrt x86_64**. Это статическая Linux amd64 сборка без CGO и NaiveProxy. Она не устанавливается на ARM/MIPS; проверка таких устройств не выполнена. Автоматического скачивания или замены движка на пользовательском роутере нет.
+
+Для IPK/OpenWrt с opkg: основной `luci-app-atlas_0.27.0-3_all.ipk` и дополнительный `atlas-engine_1.13.21-1_x86_64.ipk`. Для APK/OpenWrt с apk: `luci-app-atlas-0.27.0-r3.apk` и `atlas-engine-1.13.21-r1.apk`. APK локальные и не подписаны доверенным публичным ключом: при установке нужен явный `--allow-untrusted`. Контрольные суммы приложены отдельно. Дополнительный движок занимает место рядом со штатным; меньший расход flash не заявляется.
+
+## Проверки и ограничения
+
+Автоматические проверки: 333 теста на Linux без пропусков; Windows — 316 успешных, 17 требуют Linux. Chrome: формы desktop/mobile и сохранение резервного профиля/URL скачивания; RPC моделируется.
+
+В виртуальной OpenWrt 25.12 x86/64 проверены настоящим расширенным движком: полная конфигурация с TUN, декодирование xhttp/splithttp, скачивание 65536 байт через контролируемый прокси, пропуск первого мёртвого резервного сервера и выбор следующего, возврат к основному после восстановления. Это локальные контролируемые серверы; внешний XHTTP-сервер и физический роутер не испытывались. Также проверяется запуск службы Atlas с установленным дополнительным пакетом.
+
+Расширенные настройки URLTest работают в нативном режиме «Самый быстрый», без приоритета стран, стратегии стабильности/самого медленного и порогов пинга. Совмещение отклоняется явно, чтобы нативный URLTest не обходил критерии Atlas. Обычные фильтры допустимы, но резерв должен оставаться в выбранном активном пуле. Требуется минимум один основной сервер. Для экспертной секции те же параметры задаются в JSON; ссылки `fallbacks` включены в проверку графа и изоляцию имён.
+
+Обработчик резервных серверов и проверка скачивания принадлежат расширенному движку. Новые параметры не превращают Atlas в программу без лимитов памяти и не доказывают превосходство по всем показателям. Скорость, CPU/RAM, IPv4/IPv6-утечки, многосуточная устойчивость и поддержка всех версий OpenWrt требуют сопоставимых испытаний. Результаты нагрузки 0.26.1 нельзя автоматически считать измерениями новой версии или нового движка.
+
+Отдельно испытан окончательный Atlas 0.27.0-r3 с Atlas Engine на том же виртуальном стенде: 12 запусков, 2012 успешных HTTP-запросов и 2012 DNS-запросов, сохранение FakeIP и отклонение устаревшего выбранного узла. На повторных 1000 запросах к известным доменам кэш оставался 256 КиБ, RSS — 29.02–29.56 МиБ; активных завершённых HTTP-соединений не осталось. Это наблюдение ниже диапазона 41.86–42.66 МиБ прежнего Atlas со штатным движком в аналогичном коротком сценарии, но не сравнение с Podkop и не гарантия отсутствия утечек. База может увеличиваться при новых доменах; глобальной квоты нет.
+
+Повторный UDP-тест нового движка при постоянной смене клиентских сокетов доставил 800 запросов; два потребовали повторной отправки после таймаута. Дескрипторы оставались на уровне 11, исчерпания не обнаружено. Причина первых таймаутов не установлена; этот вопрос остаётся открытым. Длительная устойчивость и отсутствие любых таймаутов не заявляются.
+
+Пакеты этого выпуска подготовлены локально; публикация GitHub в этой задаче не выполнялась.
+PK     |�H]+V��       SHA256SUMS-0.283b572e334ba9a59df2360f6fb68b49c093268e957b6e3ad095308531d57597c7  luci-app-atlas_0.28.0-1_all.ipk
+bf03fd6bd5bc22de0e92b9941a1d0f0af5d0ab7a877df5f2530bb237936f60c4  luci-app-atlas-0.28.0-r1.apk
+596678324ed722fa4e191a0bb27785a11daefd467bc8cb416954c09c9eab63b7  atlas-openwrt-0.28.0-beta.zip
+cb382794619d60d395654940fb32e73bfe5af473cded0146d7adf5ef88a1abb0  atlas-engine_1.13.21-3_x86_64.ipk
+4e1218795f9811c4f43709390d4f396b5f109c5a86696f2f55ebf8ca8386772c  atlas-engine-1.13.21-r3.apk
+1304874aeba7d4405b5894ad8db0f440084821c85d4499c8212aeda506db61aa  install-release.sh
+618e8ed7e84c64b4b1943d830e2e8e41d64f9106a3b5a38bad435f6894abac34  Atlas-0.27-resources.json
+030c65c93507953ff2716f8220cf13ad277f46fbd9f627091cf62f6c02e6d3ca  Atlas-0.27-udp.json
+d4dcebe85a39470197aebce919ad2336bc6e0868fbc7affa829536a5a6754430  Atlas-0.27-service.json
+06e45bba474159b3c168a24912234d07241c3f3e244f6021d5c9aecc40045858  Atlas-0.27-extensions.json
+1577314079f4802da851037ca19d834ed8628f5394abf1172bd2ddd66a92f4d9  atlas-engine-1.13.21-r3-source.zip
+450563fd365267951d6c8021db306f78e617dcbe52a3a24f1c0a83eb5eec792f  Atlas-0.28-report.md
+30e233083317ed759018399bf0e328cda4673cff8e09279fe1b9e94f010a8d29  Atlas-0.28-linux-tests.txt
+5788c66cae8b4bde70fcb848e7a34d3e142dad017926d929b916910b94841c6c  Atlas-0.28-browser-tests.txt
+37dc7275cea700d3a40e627c91796419904fc02d753f642d07722bda4bd273b8  Atlas-0.27-report.md
+PK      {�H]��:�� ��            ��    luci-app-atlas_0.28.0-1_all.ipkPK      \�H]�6��� ��            ��� luci-app-atlas-0.28.0-r1.apkPK      |�H]��JL�mz �mz            ��e atlas-openwrt-0.28.0-beta.zipPK      `�H]m�I� I� !           ���ґ atlas-engine_1.13.21-3_x86_64.ipkPK      `�H]5}P$� P$�            ��p�%atlas-engine-1.13.21-r3.apkPK      �H]4Fm�
+  �
+             ���ٹinstall-release.shPK      ��G]_Y�               ����Atlas-0.27-resources.jsonPK      ��G]ә�l  l             ��6��Atlas-0.27-udp.jsonPK      ��G]���y�   �              �����Atlas-0.27-service.jsonPK      ��G]A��\�  �             ����Atlas-0.27-extensions.jsonPK      d�H]��J��P�P"           �� �atlas-engine-1.13.21-r3-source.zipPK      ��H]�                 ���P�Atlas-0.28-report.mdPK      \�H]�!���  �             ��*q�Atlas-0.28-linux-tests.txtPK      O�H]�q��   �              ��h0�Atlas-0.28-browser-tests.txtPK      ��G]��-��"  �"             ��:1�Atlas-0.27-report.mdPK      |�H]+V��               ��HT�SHA256SUMS-0.28PK      r  �Y�  
