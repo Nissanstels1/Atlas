@@ -1,0 +1,72 @@
+{
+  "ok": true,
+  "version": "0.14.0",
+  "checked_utc": "2026-10-03T13:50:25.376055+00:00",
+  "platform": "OpenWrt 24.10.7 x86/64 QEMU snapshot",
+  "engine": "sing-box 1.12.22",
+  "package_sha256": "d4eb0e7ed401229a3e2f296fd0dd7b9847fb82b8a7baedca42099a5905149b66",
+  "lab_summary": {
+    "ok": true,
+    "version": "0.14.0",
+    "engine": "sing-box 1.12.22",
+    "installed": true,
+    "runtime_start": true,
+    "monitor": true,
+    "inline_import_rpc": true,
+    "large_import_backend": true,
+    "yaml_anytls_schema_check": true,
+    "fakeip_dnsmasq": true,
+    "real_pool_slowest_https_block_recover": true,
+    "section_list_fakeip": true,
+    "country_empty_pool_guard": true,
+    "provider_fixture": {
+      "crypt5_native": true,
+      "cached_profiles": 9,
+      "schema_checked": 9,
+      "live_fetch": false
+    },
+    "package_sha256": "d4eb0e7ed401229a3e2f296fd0dd7b9847fb82b8a7baedca42099a5905149b66",
+    "dns_enable_apply_restore": true,
+    "service_stop_restore": true,
+    "fakeip_persistence_strict_restart": true,
+    "selector_namespace_rotated": true,
+    "browser_diagnostics_schema": true
+  },
+  "unit_tests": {
+    "total": 174,
+    "passed": 174,
+    "skipped": 0,
+    "schema_engine": "sing-box 1.12.12"
+  },
+  "ui": {
+    "javascript_syntax": true,
+    "dom_seven_views": true,
+    "client_fetch_simulation": true,
+    "browser_fakeip_success_and_unavailable_simulated": true,
+    "external_browser_end_to_end": false
+  },
+  "verified_changes": [
+    "FakeIP mappings retained across real strict-policy service restart with reverse query order",
+    "selector namespace rotates; strict main selector restarts blocked",
+    "real two-pool slowest selection, HTTPS 204, max-ping block and recovery",
+    "engine API readiness required before apply success; launcher-only state regression covered",
+    "opt-in browser diagnostic DNS/route configuration accepted by sing-box 1.12.22",
+    "browser check results remain in page memory; unavailable service distinguished from negative result",
+    "local crypt5 and nine historical cached profiles imported and schema checked"
+  ],
+  "sdk_build": {
+    "builder_added": true,
+    "help_and_invalid_sdk_validation": true,
+    "native_sdk_build_executed": false,
+    "ready_apk": false
+  },
+  "limits": [
+    "No fresh provider fetch, actual provider exit or Estonia verification",
+    "Browser diagnostic external services and LAN packet path not tested end to end",
+    "SDK/IPK-to-APK native build not executed; no ready 25.12 APK",
+    "Physical ARM/MIPS routers and load not tested",
+    "No same-hardware Podkop throughput/CPU/RAM/flash comparison",
+    "No unrestricted sing-box outbound editor",
+    "No claim of all Podkop advantages or superiority in every parameter"
+  ]
+}

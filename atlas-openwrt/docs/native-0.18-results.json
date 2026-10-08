@@ -1,0 +1,11 @@
+{
+  "atlas_version": "0.18.0",
+  "platform": "OpenWrt 25.12.0 x86_64 virtual machine",
+  "engine": "sing-box 1.13.21",
+  "apk_sha256": "b1f39f447b171dd9aed9da5eeb7f0d9e61736df146600d66ceb81ebe73f1f47c",
+  "native_rpc_test_exit": 0,
+  "passed": ["preview and engine validation preserve saved state/configuration and stopped service", "route explanation and scoped domain/device exceptions", "disabled section cloning", "independent autostart while stopped and running", "service journal", "procd/TUN start and stop", "section engine routing and DNS/FakeIP validation", "authenticated proxy listener isolation"],
+  "linux_host_tests": {"total": 247, "passed": 237, "skipped": 10},
+  "physical_router_tested": false,
+  "comparative_performance_measured": false
+}

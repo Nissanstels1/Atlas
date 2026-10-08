@@ -1,0 +1,50 @@
+{
+  "ok": true,
+  "version": "0.12.0",
+  "checked_utc": "2026-10-03T12:16:50Z",
+  "platform": "OpenWrt 24.10.7 x86/64 QEMU snapshot",
+  "engine": "sing-box 1.12.22",
+  "package_sha256": "e8b07b365f0a98bf20eb7927957324153dcf7da2387a6f6a4187267eac609879",
+  "lab_summary": {
+    "ok": true,
+    "version": "0.12.0",
+    "engine": "sing-box 1.12.22",
+    "installed": true,
+    "runtime_start": true,
+    "monitor": true,
+    "inline_import_rpc": true,
+    "large_import_backend": true,
+    "yaml_anytls_schema_check": true,
+    "fakeip_dnsmasq": true,
+    "country_empty_pool_guard": true,
+    "provider_fixture": {
+      "crypt5_native": true,
+      "cached_profiles": 9,
+      "schema_checked": 9,
+      "live_fetch": false
+    },
+    "dns_enable_apply_restore": true,
+    "service_stop_restore": true
+  },
+  "unit_tests": {
+    "total": 166,
+    "passed": 159,
+    "skipped_optional_engine": 7
+  },
+  "luci_dom": "passed",
+  "node_syntax": "passed",
+  "python_compile": "passed",
+  "visual_browser_test": "not run: Chromium executable unavailable",
+  "provider_check": {
+    "checked_utc": "2026-10-03T12:16:50Z",
+    "crypt5": "decrypted_locally",
+    "provider_fetch": "failed",
+    "failure_type": "AtlasError",
+    "live_tunnel": "not_confirmed",
+    "estonia_exit": "not_confirmed"
+  },
+  "country_policy_test": "synthetic country evidence; real firewall/service effects",
+  "external_country_service": "not reached through a real provider node",
+  "physical_router": "not tested",
+  "client_leak_tests": "not tested"
+}

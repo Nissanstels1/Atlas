@@ -1,0 +1,645 @@
+{
+  "atlas_version": "0.19.0",
+  "podkop_version": "0.7.22",
+  "podkop_source_zip_sha256": "425458826a1f10c5c42acbaa1905cb152fce8979e049678832b3d61572638c5a",
+  "method": "One user scenario per row; found/not_found applies to checked built-in features, not external recipes or universal impossibility.",
+  "counts": {
+    "registry_size": 70,
+    "atlas_implemented": 70,
+    "atlas_partial": 0,
+    "podkop_found": 50,
+    "podkop_not_found": 20
+  },
+  "features": [
+    {
+      "id": 1,
+      "function": "Импорт прокси URI",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:parse_uri",
+      "podkop_evidence": "section.js:proxy_string",
+      "note": ""
+    },
+    {
+      "id": 2,
+      "function": "Ручной selector нескольких серверов",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "sections.py:choose_section",
+      "podkop_evidence": "section.js:selector_proxy_links",
+      "note": ""
+    },
+    {
+      "id": 3,
+      "function": "Автоматический URLTest с параметрами",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:make_config",
+      "podkop_evidence": "section.js:urltest_proxy_links",
+      "note": ""
+    },
+    {
+      "id": 4,
+      "function": "Независимые секции маршрутизации",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:make_config",
+      "podkop_evidence": "section.js:connection_type",
+      "note": ""
+    },
+    {
+      "id": 5,
+      "function": "Администраторский JSON outbound",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "outbounds.py:outbound_graph",
+      "podkop_evidence": "section.js:outbound_json",
+      "note": ""
+    },
+    {
+      "id": 6,
+      "function": "Маршрут через VPN-интерфейс",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:make_config",
+      "podkop_evidence": "section.js:interface",
+      "note": ""
+    },
+    {
+      "id": 7,
+      "function": "Блокирующая секция",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:make_config",
+      "podkop_evidence": "section.js:connection_type",
+      "note": ""
+    },
+    {
+      "id": 8,
+      "function": "Секция исключения из прокси",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:priority_exclusions",
+      "podkop_evidence": "section.js:connection_type",
+      "note": ""
+    },
+    {
+      "id": 9,
+      "function": "Каталог списков сообщества",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "overview.js:communityLists",
+      "podkop_evidence": "section.js:community_lists",
+      "note": ""
+    },
+    {
+      "id": 10,
+      "function": "Пользовательские доменные списки",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:validate_settings",
+      "podkop_evidence": "section.js:user_domains",
+      "note": ""
+    },
+    {
+      "id": 11,
+      "function": "Пользовательские IP/CIDR списки",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:validate_settings",
+      "podkop_evidence": "section.js:user_subnets",
+      "note": ""
+    },
+    {
+      "id": 12,
+      "function": "Полный маршрут трафика устройства",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:routed_source_ips",
+      "podkop_evidence": "section.js:fully_routed_ips",
+      "note": ""
+    },
+    {
+      "id": 13,
+      "function": "Локальные файловые списки",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:local_rule_bytes",
+      "podkop_evidence": "section.js:local_domain_lists",
+      "note": ""
+    },
+    {
+      "id": 14,
+      "function": "Удалённые списки доменов/CIDR",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:fetch_rule_list",
+      "podkop_evidence": "section.js:remote_domain_lists",
+      "note": ""
+    },
+    {
+      "id": 15,
+      "function": "JSON и бинарные SRS списки",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:fetch_rule_set",
+      "podkop_evidence": "rulesets.sh",
+      "note": ""
+    },
+    {
+      "id": 16,
+      "function": "Назначение списка выходу секции",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:section_targets",
+      "podkop_evidence": "podkop:configure_routing_for_section_lists",
+      "note": ""
+    },
+    {
+      "id": 17,
+      "function": "Загрузка списков через прокси/VPN",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:fetch_rule_proxy_url",
+      "podkop_evidence": "settings.js:download_lists_via_proxy",
+      "note": ""
+    },
+    {
+      "id": 18,
+      "function": "Выбор секции загрузки списков",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:fetch_lists_section",
+      "podkop_evidence": "settings.js:download_lists_via_specific_proxy",
+      "note": ""
+    },
+    {
+      "id": 19,
+      "function": "HTTP/SOCKS вход секции",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:section_inbounds",
+      "podkop_evidence": "section.js:mixed_proxy_enabled",
+      "note": ""
+    },
+    {
+      "id": 20,
+      "function": "Повторное разрешение реального IP",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:resolve_real_ip",
+      "podkop_evidence": "section.js:resolve_real_ip_for_routing",
+      "note": ""
+    },
+    {
+      "id": 21,
+      "function": "UDP поверх TCP",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:udp_over_tcp",
+      "podkop_evidence": "section.js:enable_udp_over_tcp",
+      "note": ""
+    },
+    {
+      "id": 22,
+      "function": "Основной DNS DoH/DoT/UDP и свой сервер",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:dns_server_from_uri",
+      "podkop_evidence": "settings.js:dns_type",
+      "note": ""
+    },
+    {
+      "id": 23,
+      "function": "Bootstrap DNS",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:bootstrap_dns_type",
+      "podkop_evidence": "settings.js:bootstrap_dns_server",
+      "note": ""
+    },
+    {
+      "id": 24,
+      "function": "FakeIP с управляемым TTL и кешем",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:make_config",
+      "podkop_evidence": "settings.js:dns_rewrite_ttl",
+      "note": ""
+    },
+    {
+      "id": 25,
+      "function": "Выходной сетевой интерфейс",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:default_interface",
+      "podkop_evidence": "settings.js:output_network_interface",
+      "note": ""
+    },
+    {
+      "id": 26,
+      "function": "Восстановление после событий интерфейса",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:interface_recover",
+      "podkop_evidence": "settings.js:badwan_monitored_interfaces",
+      "note": ""
+    },
+    {
+      "id": 27,
+      "function": "YACD, ключ и выбор привязки API",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:clash_api",
+      "podkop_evidence": "settings.js:enable_yacd",
+      "note": ""
+    },
+    {
+      "id": 28,
+      "function": "Отключение QUIC",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:disable_quic",
+      "podkop_evidence": "settings.js:disable_quic",
+      "note": ""
+    },
+    {
+      "id": 29,
+      "function": "Обход прокси для NTP",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:exclude_ntp",
+      "podkop_evidence": "settings.js:exclude_ntp",
+      "note": ""
+    },
+    {
+      "id": 30,
+      "function": "Плановое обновление списков",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:scheduled",
+      "podkop_evidence": "settings.js:update_interval",
+      "note": ""
+    },
+    {
+      "id": 31,
+      "function": "DNS-интеграция DHCP с отключением",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:manage_dhcp_dns",
+      "podkop_evidence": "settings.js:dont_touch_dhcp",
+      "note": ""
+    },
+    {
+      "id": 32,
+      "function": "Конфигурация в RAM/flash",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:stored_config_dir",
+      "podkop_evidence": "settings.js:config_path",
+      "note": ""
+    },
+    {
+      "id": 33,
+      "function": "Кеш в RAM/flash",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:prepare_runtime_paths",
+      "podkop_evidence": "settings.js:cache_path",
+      "note": ""
+    },
+    {
+      "id": 34,
+      "function": "Уровни и просмотр журнала службы",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:service_logs",
+      "podkop_evidence": "logging.sh;renderAvailableActions.ts:viewLogs",
+      "note": ""
+    },
+    {
+      "id": 35,
+      "function": "Монитор трафика/соединений/памяти",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:runtime_monitor",
+      "podkop_evidence": "tabs/dashboard/render.ts",
+      "note": ""
+    },
+    {
+      "id": 36,
+      "function": "Переключение и замер серверов секции",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "sections.py:test_section",
+      "podkop_evidence": "tabs/dashboard/partials/renderSections.ts",
+      "note": ""
+    },
+    {
+      "id": 37,
+      "function": "Самопроверка DNS/FakeIP",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:selftest",
+      "podkop_evidence": "tabs/diagnostic/checks/runFakeIPCheck.ts",
+      "note": ""
+    },
+    {
+      "id": 38,
+      "function": "Проверка FakeIP из браузера",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "overview.js:clientPrivacyTest",
+      "podkop_evidence": "tabs/diagnostic/checks/runFakeIPCheck.ts",
+      "note": ""
+    },
+    {
+      "id": 39,
+      "function": "Запуск, применение и остановка службы",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:worker",
+      "podkop_evidence": "renderAvailableActions.ts",
+      "note": ""
+    },
+    {
+      "id": 40,
+      "function": "Автозапуск отдельно от службы",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:set_autostart",
+      "podkop_evidence": "renderAvailableActions.ts:enable/disable",
+      "note": ""
+    },
+    {
+      "id": 41,
+      "function": "Пакеты IPK и APK",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "tools/build_ipk.py;tools/build-apk.py",
+      "podkop_evidence": "install.sh",
+      "note": ""
+    },
+    {
+      "id": 42,
+      "function": "Просмотр конфигурации",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "planner.py:safe_config",
+      "podkop_evidence": "renderAvailableActions.ts:showSingBoxConfig",
+      "note": ""
+    },
+    {
+      "id": 43,
+      "function": "Исключённые устройства из маршрутизации",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:routing_excluded_ips",
+      "podkop_evidence": "settings.js:routing_excluded_ips",
+      "note": ""
+    },
+    {
+      "id": 44,
+      "function": "Точное сопоставление входного интерфейса",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:interface_inbound;atlas.py:manage_ingress_firewall",
+      "podkop_evidence": "nft.sh",
+      "note": "Отдельные TUN с include_interface и правилами iif; одинаковые подсети проверены настоящими UDP-пакетами."
+    },
+    {
+      "id": 45,
+      "function": "Незашифрованные HTTP URL списков",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:fetch_rule_list",
+      "podkop_evidence": "section.js:remote_domain_lists",
+      "note": "HTTP/HTTPS и file://; публичные URL, HTTPS не понижается до HTTP."
+    },
+    {
+      "id": 46,
+      "function": "Секции без программного лимита",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:validate_settings",
+      "podkop_evidence": "podkop:config_foreach",
+      "note": "Лимит 256 секций и selector choices снят. Ограничения размера RPC, ресурсов, источников списков и кеша остаются."
+    },
+    {
+      "id": 47,
+      "function": "Произвольный локальный путь списка/кеша",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "core.py:rule_list_url;atlas.py:prepare_runtime_paths",
+      "podkop_evidence": "section.js:local_domain_lists;settings.js:cache_path",
+      "note": "Собственные абсолютные пути локальных списков и кеша; символические ссылки исключены."
+    },
+    {
+      "id": 48,
+      "function": "Готовый опубликованный релиз и зеркало",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "GitHub Releases v0.19.0-beta;tools/install-release.sh",
+      "podkop_evidence": "install.sh;podkop.net/docs/install",
+      "note": "GitHub Releases: https://github.com/Nissanstels1/Atlas/releases/tag/v0.19.0-beta ; IPK/APK, исходники, SHA256SUMS и HTTPS-установщик."
+    },
+    {
+      "id": 49,
+      "function": "Отдельная подробная nftables диагностика",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "firewall_diag.py:inspect;atlas.py:nft_diagnostics",
+      "podkop_evidence": "tabs/diagnostic/checks/runNftCheck.ts",
+      "note": "Администраторский RPC/LuCI: nftables JSON, fw4, TUN, правила и маршруты IPv4/IPv6; только чтение."
+    },
+    {
+      "id": 50,
+      "function": "Менеджер нескольких подписок",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:save_subscription",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "64 источника, индивидуальные обновления/включение/удаление"
+    },
+    {
+      "id": 51,
+      "function": "Массовый импорт подписок",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:import_subscriptions",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Пакетный ввод и проверка источников"
+    },
+    {
+      "id": 52,
+      "function": "Метаданные тарифа и срока подписки",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:fetch;overview.js:subscriptionsPage",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Квоты/сроки при наличии заголовков провайдера"
+    },
+    {
+      "id": 53,
+      "function": "Условное обновление и изменения профилей",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:fetch;refresh",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "ETag/Last-Modified и добавленные/удалённые профили"
+    },
+    {
+      "id": 54,
+      "function": "Локальные редактируемые источники профилей",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:import_profiles;get_profiles",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "URI/Base64, Clash/Mihomo YAML и sing-box JSON"
+    },
+    {
+      "id": 55,
+      "function": "Импорт Happ crypt5",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "happ.py",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Поддержка зашифрованного адреса подписки"
+    },
+    {
+      "id": 56,
+      "function": "Фильтры и приоритет стран",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "core.py:filter_nodes",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Включение/исключение стран и порядок предпочтения"
+    },
+    {
+      "id": 57,
+      "function": "Проверка страны реального выхода",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:proxied_exit_country",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Не только название узла; срок доверия ограничен"
+    },
+    {
+      "id": 58,
+      "function": "Фильтры узлов по протоколу/имени",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "core.py:filter_nodes",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Буквальные включающие и исключающие фильтры"
+    },
+    {
+      "id": 59,
+      "function": "Альтернативные критерии выбора и пороги пинга",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:auto_choice",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Fastest/slowest/stable и диапазон допустимой задержки"
+    },
+    {
+      "id": 60,
+      "function": "Проверяемое резервное копирование/восстановление",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "backups.py",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Настройки и профили; чувствительные данные в резервной копии"
+    },
+    {
+      "id": 61,
+      "function": "Диагностический экспорт без секретов",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:diagnostic_report",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Отдельный отчёт вместо передачи резервной копии"
+    },
+    {
+      "id": 62,
+      "function": "DNS-фильтр AdGuard и импорт hosts/AdGuard",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:parse_rule_list;core.py:dns_filter",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Только поддерживаемый DNS-набор, не все правила браузерных расширений"
+    },
+    {
+      "id": 63,
+      "function": "Блокировка известных клиентских DoH",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "core.py:KNOWN_DOH_DOMAINS",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Не обнаруживает все возможные DoH"
+    },
+    {
+      "id": 64,
+      "function": "Firewall kill-switch и строгая политика выхода",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:manage_kill_switch",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Не выдаёт отсутствие подходящего узла за успешный прокси"
+    },
+    {
+      "id": 65,
+      "function": "Секционные условия портов и транспорта",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "core.py:validate_settings",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Точные порты, диапазоны, TCP/UDP"
+    },
+    {
+      "id": 66,
+      "function": "Исключения только внутри секции",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "core.py:section_match",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Домены, IP назначения и устройства; следующие правила продолжают действовать"
+    },
+    {
+      "id": 67,
+      "function": "Копирование сохранённой секции",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "atlas.py:section_clone",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Новый ID, выключенная копия, без открытого прокси-порта"
+    },
+    {
+      "id": 68,
+      "function": "Проверка конфигурации без применения",
+      "atlas": "implemented",
+      "podkop": "found",
+      "atlas_evidence": "atlas.py:config_preview",
+      "podkop_evidence": "podkop:check_proxy (CLI dispatch; sing-box -c config_path check)",
+      "note": "Оба проверяют без перезапуска. Podkop проверяет существующий файл; Atlas строит временную конфигурацию из сохранённых настроек."
+    },
+    {
+      "id": 69,
+      "function": "Объяснение маршрута без сетевых запросов",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "planner.py:explain_route",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Трёхзначная логика; неизвестный SRS/вход не превращается в уверенный ответ"
+    },
+    {
+      "id": 70,
+      "function": "Поиск перекрытия простых доменных секций",
+      "atlas": "implemented",
+      "podkop": "not_found",
+      "atlas_evidence": "planner.py:conflicts",
+      "podkop_evidence": "Checked 0.7.22 source and docs",
+      "note": "Первые 1000 простых доменных правил; сложные правила требуют проверки"
+    }
+  ]
+}

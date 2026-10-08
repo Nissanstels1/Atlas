@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "subscriptions": [],
+  "settings": {
+    "mode": "rules",
+    "selected": "auto",
+    "domains": [],
+    "cidrs": [],
+    "bypass_domains": [],
+    "bypass_cidrs": [],
+    "interval_hours": 12,
+    "countries": [],
+    "protocols": [],
+    "include_names": [],
+    "exclude_names": [],
+    "auto_interval_seconds": 60,
+    "auto_tolerance_ms": 80,
+    "interrupt_connections": false
+  }
+}

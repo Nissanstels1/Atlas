@@ -1,0 +1,26 @@
+{
+  "test": "Settings validation of five cached lists, 50000 distinct domain entries",
+  "host": "Windows x86/64, Python 3.12.14",
+  "repeats": 3,
+  "scope": "Local Python settings validation only; not router throughput or a Podkop comparison",
+  "baseline_source_sha256": "86e5551cb6d241ff69bc8ddda0270703a55b25906b642e35b9852a1b11d7942b",
+  "results": {
+    "Atlas 0.14.0": {
+      "samples_seconds": [
+        1.3946831999346614,
+        1.3953895999584347,
+        1.4086750000715256
+      ],
+      "median_seconds": 1.3953895999584347
+    },
+    "Atlas 0.16.0": {
+      "samples_seconds": [
+        0.21255629998631775,
+        0.21607790002599359,
+        0.2225715999957174
+      ],
+      "median_seconds": 0.21607790002599359
+    }
+  },
+  "speedup_ratio": 6.457808039556905
+}

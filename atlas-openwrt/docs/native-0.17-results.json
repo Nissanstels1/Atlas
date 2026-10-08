@@ -1,0 +1,21 @@
+{
+  "version": "0.17.0",
+  "platform": "OpenWrt 25.12.0 x86_64 QEMU",
+  "engine": "sing-box 1.13.21",
+  "package": "luci-app-atlas-0.17.0-r1.apk",
+  "build": "Official SDK 25.12.0 apk-tools 3.0.2, architecture-independent payload, dependencies from official feeds",
+  "sha256": "25fb32fbafd17ccdcc6c839da3aa67ecb4a37a19398ad4b981df5b0edc04222e",
+  "checks": {
+    "dependency_install": true,
+    "package_install": true,
+    "rpc_version": true,
+    "list_section_routing_and_manual_switch": true,
+    "list_download_section_switch": true,
+    "independent_authenticated_listeners": true,
+    "procd_start_and_tun": true,
+    "selector_saved_and_restored_after_restart": true,
+    "yacd_bundled_page": true,
+    "api_rejects_missing_secret": true
+  },
+  "not_verified": ["Physical router", "LAN/WAN end-to-end", "DHCP recovery", "Other CPU architectures", "Comparative Podkop performance", "Current IPK installation on 24.10"]
+}

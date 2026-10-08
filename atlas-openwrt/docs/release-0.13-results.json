@@ -1,0 +1,68 @@
+{
+  "ok": true,
+  "version": "0.13.0",
+  "checked_utc": "2026-10-03T13:00:40.643616+00:00",
+  "platform": "OpenWrt 24.10.7 x86/64 QEMU snapshot",
+  "engine": "sing-box 1.12.22",
+  "package_sha256": "7131475b59099fa76b04b2a6ed959b6da0b55aaff2610563cfef3e20d32e5015",
+  "lab_summary": {
+    "ok": true,
+    "version": "0.13.0",
+    "engine": "sing-box 1.12.22",
+    "installed": true,
+    "runtime_start": true,
+    "monitor": true,
+    "inline_import_rpc": true,
+    "large_import_backend": true,
+    "yaml_anytls_schema_check": true,
+    "fakeip_dnsmasq": true,
+    "real_pool_slowest_https_block_recover": true,
+    "section_list_fakeip": true,
+    "country_empty_pool_guard": true,
+    "provider_fixture": {
+      "crypt5_native": true,
+      "cached_profiles": 9,
+      "schema_checked": 9,
+      "live_fetch": false
+    },
+    "package_sha256": "7131475b59099fa76b04b2a6ed959b6da0b55aaff2610563cfef3e20d32e5015",
+    "dns_enable_apply_restore": true,
+    "service_stop_restore": true
+  },
+  "unit_tests": {
+    "total": 172,
+    "passed": 172,
+    "skipped": 0,
+    "schema_engine": "sing-box 1.12.12"
+  },
+  "ui": {
+    "javascript_syntax": true,
+    "dom_seven_views": true,
+    "client_fetch_simulation": true,
+    "visual_browser": false,
+    "real_browser_privacy_requests": false
+  },
+  "verified_changes": [
+    "independent custom criteria for main and subscription selectors",
+    "real URLTest slowest selection and HTTPS 204 in both pools",
+    "reject and recover traffic in both pools at max ping threshold",
+    "blocked initial custom selection and disabled selector cache",
+    "FakeIP DNS for sections and remote lists with no main domains",
+    "real resolve action accepted by sing-box schema",
+    "WAN-bound baseline with no fallback: unit check",
+    "duplicate node normalization",
+    "failed latest delay and missing timestamp excluded"
+  ],
+  "limits": [
+    "Public provider fetch and fresh profiles unconfirmed; 9 cached user profiles imported",
+    "Estonia and actual provider exits unconfirmed",
+    "Physical routers, ARM/MIPS, OpenWrt 25.12 APK untested",
+    "Real browser DNS/DoH/STUN leakage and load untested",
+    "No same-hardware CPU/RAM/flash/throughput comparison with Podkop",
+    "Custom criteria re-evaluated once per minute, based on measured delays",
+    "Custom selection disables cache and FakeIP persistence",
+    "FakeIP DNS with source-specific or combined destination-CIDR conditions has documented limitations",
+    "Resolve action tested by schema, external DNS transfer not separately tested",
+    "No claim of complete Podkop parity or superiority in every parameter"
+  ]
+}

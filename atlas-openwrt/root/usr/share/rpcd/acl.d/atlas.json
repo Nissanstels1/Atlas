@@ -1,0 +1,36 @@
+{
+  "luci-app-atlas": {
+    "description": "Atlas subscription and routing manager",
+    "read": {
+      "ubus": {
+        "atlas": [
+          "status"
+        ]
+      }
+    },
+    "write": {
+      "ubus": {
+        "atlas": [
+          "save_subscription",
+          "import_subscriptions",
+          "import_profiles",
+          "delete_subscription",
+          "save_settings",
+          "import_rules",
+          "action",
+          "monitor",
+          "section_details",
+          "get_profiles",
+          "export_backup",
+          "restore_backup",
+          "diagnostic_report",
+          "section_dashboard",
+          "section_select",
+          "dashboard_access"
+          ,"config_preview", "route_explain", "section_clone", "set_autostart", "service_logs", "nft_diagnostics"
+        ]
+      }
+    }
+  }
+}
+

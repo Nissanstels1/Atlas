@@ -1,0 +1,2 @@
+YACD by haishanh: https://github.com/haishanh/yacd
+MIT license; static gh-pages distribution.

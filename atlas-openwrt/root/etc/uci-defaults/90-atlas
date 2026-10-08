@@ -1,0 +1,12 @@
+#!/bin/sh
+umask 077
+mkdir -p /etc/atlas /var/run/atlas
+chmod 700 /etc/atlas /var/run/atlas
+# One bounded watchdog/profile-selection run per minute; subscription intervals are enforced by the backend.
+mkdir -p /etc/crontabs
+touch /etc/crontabs/root
+sed -i '/atlas[.]py scheduled/d' /etc/crontabs/root
+echo '* * * * * /usr/bin/python3 /usr/lib/atlas/atlas.py scheduled >/dev/null 2>&1' >> /etc/crontabs/root
+/etc/init.d/cron enable
+/etc/init.d/cron restart
+exit 0

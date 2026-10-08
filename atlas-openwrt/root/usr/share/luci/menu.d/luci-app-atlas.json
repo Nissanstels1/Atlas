@@ -1,0 +1,7 @@
+{
+  "admin/services/atlas": {
+    "title": "Atlas", "order": 30,
+    "action": {"type": "view", "path": "atlas/overview"},
+    "depends": {"acl": ["luci-app-atlas"]}
+  }
+}
