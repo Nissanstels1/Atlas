@@ -4,14 +4,14 @@ class N {
  constructor(tag,text=''){this.tag=tag;this.data=text;this.children=[];this.attributes={};this.listeners={};this.value='';this.checked=false;}
  appendChild(c){this.children.push(c);return c;}
  replaceChildren(...c){this.children=c;}
- setAttribute(k,v){this.attributes[k]=v;if(k==='value')this.value=v;}
+ setAttribute(k,v){this.attributes[k]=String(v);if(k==='value')this.value=v;if(['disabled','checked','selected','readonly'].includes(k))this[k]=true;}
  addEventListener(k,v){this.listeners[k]=v;}
  get textContent(){return this.data+this.children.map(c=>c.textContent||'').join('');}
  set textContent(s){this.children=[];this.data=s;}
 }
 global.document={createTextNode:s=>new N('#text',String(s)),createElement:t=>new N(t)};
 global.FileReader=class { readAsArrayBuffer(file){const b=Buffer.from(file.content,'utf8');this.result=b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength);if(this.onload)this.onload();} };
-function E(t,a={},c=[]){const n=new N(t);for(const [k,v] of Object.entries(a)){if(typeof v==='function')n.listeners[k]=v;else if(v!==false&&v!=null){n.setAttribute(k,v);if(['disabled','checked','selected'].includes(k))n[k]=v;}}const add=x=>{if(Array.isArray(x))x.forEach(add);else if(x!=null)n.appendChild(x instanceof N?x:new N('#text',String(x)));};add(c);if(t==='textarea')n.value=n.textContent;if(t==='select'){const opt=n.children.find(c=>c.selected)||n.children[0];n.value=opt?.attributes.value||'';}return n;}
+function E(t,a={},c=[]){const n=new N(t);for(const [k,v] of Object.entries(a)){if(typeof v==='function')n.listeners[k]=v;else if(v!=null){n.setAttribute(k,v);}}const add=x=>{if(Array.isArray(x))x.forEach(add);else if(x!=null)n.appendChild(x instanceof N?x:new N('#text',String(x)));};add(c);if(t==='textarea')n.value=n.textContent;if(t==='select'){const opt=n.children.find(c=>c.selected)||n.children[0];n.value=opt?.attributes.value||'';}return n;}
 const initial={ok:true,version:'0.12.0',running:false,engine:'sing-box 1.14.1',job:{},applied:{},privacy:{checks:[{id:'dns_hijack',ok:true,label:'DNS проверяется'}],notice:'Аудит конфигурации'},privacy_egress:{status:'done',same_exit:false},settings:{mode:'rules',selected:'auto',domains:[],cidrs:[],bypass_domains:[],bypass_cidrs:[],blocked_domains:[],interval_hours:12,dns_filter:'cloudflare',fakeip:false,fakeip_ttl_seconds:60,kill_switch:false,remote_lists:[]},subscriptions:[],nodes:[],checks:{}};
 const calls=[];let data=structuredClone(initial),modal=null;
 const rpc={declare:({method})=>(...args)=>{calls.push({method,args});if(method==='status')return Promise.resolve(structuredClone(data));if(method==='monitor')return Promise.resolve({ok:true,available:true,connections:[],rules:[],memory:{},upload_total:0,download_total:0});if(method==='save_settings')data.settings=args[0];if(method==='import_rules')return Promise.resolve({ok:true,domains:2,cidrs:1});if(method==='import_subscriptions')return Promise.resolve({ok:true,added:1,duplicates:1,errors:0,items:[{line:1,name:'provider.example',status:'added'},{line:2,name:'provider.example',status:'duplicate'}]});return Promise.resolve({ok:true});}};
@@ -23,6 +23,13 @@ const all=n=>[n,...n.children.flatMap(all)];
 (async()=>{
  app.render(await app.load());
  assert(app.root.textContent.includes('Начните с подписки'),'Empty state missing');
+ assert(all(app.root).find(n=>n.tag==='button'&&n.textContent==='Запустить Atlas').disabled===true,'Empty setup must block routing start');
+ assert(!all(app.root).find(n=>n.tag==='button'&&n.textContent==='Добавить подписку').disabled,'Add subscription must remain enabled with zero servers');
+ app.navigate('subscriptions');
+ assert(!all(app.root).find(n=>n.tag==='button'&&n.textContent==='+ Подписка').disabled,'Subscription button blocked by false HTML attribute');
+ app.readonly=true;app.draw();
+ assert(all(app.root).find(n=>n.tag==='button'&&n.textContent==='+ Подписка').disabled===true,'Read-only permissions must still block changes');
+ app.readonly=false;app.draw();
  for(const t of ['overview','subscriptions','nodes','routing','privacy','monitor','settings']){app.navigate(t);assert(app.root.children.length===2,t+' failed');}
  data.subscriptions=[{id:'a'.repeat(16),name:'<img src=x onerror=alert(1)>',host:'example.com',count:1,enabled:true,metadata:{}}];
  data.nodes=[{key:'a'.repeat(32),name:'Node',subscription:'Test',type:'vless',server:'example.com',port:443}];
