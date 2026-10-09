@@ -1,0 +1,68 @@
+{
+  "name": "atlas-0.28.3-installer-packages.zip",
+  "sha256": "07fe639246cd98eba33418234b9c6c67b80cceaf7d54b260301abec6414dd933",
+  "parts": [
+    {
+      "name": "part-000.bin",
+      "size": 4194304,
+      "sha256": "199315e3db975e9c12280dc3d5e1819993a30b25ff9b60cd9afb069266c395ba",
+      "git_sha": "8ff2764b8fcb6c682ee05970218afc1c6f73572d"
+    },
+    {
+      "name": "part-001.bin",
+      "size": 4194304,
+      "sha256": "e8804d1e5b3fb0242fb5d116a82fcc49e673382a95a95328f3ef083682a7f5f1",
+      "git_sha": "2016a6d78a37eb1c54b4f8041a86295876cf50ae"
+    },
+    {
+      "name": "part-002.bin",
+      "size": 4194304,
+      "sha256": "34786173ed409fba2473f1142232c0f457d227309175b99b6b56ffd9f18c6e58",
+      "git_sha": "45c206dfe6639720d3b7bd6dae003062d994853a"
+    },
+    {
+      "name": "part-003.bin",
+      "size": 4194304,
+      "sha256": "0ac181bc9ea4e28d75b65169c1a44fe591a61c5569acee788f99821c3055f7ed",
+      "git_sha": "dca9bc72bfcec5fad463ca904a867292906194cf"
+    },
+    {
+      "name": "part-004.bin",
+      "size": 4194304,
+      "sha256": "6f1edea93a7457204781bc86ba90babafd9773672baee4eafb5903dfce5e316b",
+      "git_sha": "d80d6f2fd61590146945f540ce182ea7df39453b"
+    },
+    {
+      "name": "part-005.bin",
+      "size": 4194304,
+      "sha256": "75c25ac646cc67723ae457114e6d05c96b56f84b5979f3e42b96983da2f8f270",
+      "git_sha": "acb8be8d44e2079a45ffc0759b461a02f657f948"
+    },
+    {
+      "name": "part-006.bin",
+      "size": 1834829,
+      "sha256": "76ba002a8657c00cb61b39f98522d6b0eb0b07123fc8028d29d989365128b9a8",
+      "git_sha": "143ded2b26b472d283c085143fbb2c3de935d17b"
+    }
+  ],
+  "reuse": {
+    "atlas-engine_1.13.21-3_x86_64.ipk": "cb382794619d60d395654940fb32e73bfe5af473cded0146d7adf5ef88a1abb0",
+    "atlas-engine-1.13.21-r3.apk": "4e1218795f9811c4f43709390d4f396b5f109c5a86696f2f55ebf8ca8386772c",
+    "atlas-engine-1.13.21-r3-source.zip": "1577314079f4802da851037ca19d834ed8628f5394abf1172bd2ddd66a92f4d9"
+  },
+  "asset_hashes": {
+    "luci-app-atlas_0.28.3-1_all.ipk": "9390224572fe08e0053af854be79adba1669232dad4356882e1b19ac707a9088",
+    "luci-app-atlas-0.28.3-r1.apk": "22660db8dd2362a45d3835439ed8ce542b0edc773b358603634e7648c18c17a8",
+    "atlas-engine_1.13.21-3_aarch64_generic.ipk": "2866d941e5323fab3e451bb0e3cee7991bf7a9cdf2f72c4b0843a3c9d355ef38",
+    "atlas-engine-1.13.21-r3_aarch64_generic.apk": "f14ff26eda2bdbd2d346ff1e57a8ca42a2a25ce7fb7fa1ce8c7cfb82c3c0769f",
+    "atlas-openwrt-0.28.3-beta.zip": "eaa4ae731a928027186c8dbaf31c9ffaeedc354d528233d58c9d2cd4ebc4aa66",
+    "Atlas-0.28.3-linux-tests.txt": "f0063e5c8ed46d9ad1f00e9c0d030c21057914fe438d694f0fe4e771f7e1540e",
+    "Atlas-0.28.3-windows-tests.txt": "adbf43c2757e0c25b2117fd63ad59565489bf1988ddc973d27888c429867f65e",
+    "Atlas-0.28.3-browser-tests.txt": "5788c66cae8b4bde70fcb848e7a34d3e142dad017926d929b916910b94841c6c",
+    "Atlas-0.28.3-proof-retention.json": "ccf1464ce1d6176c078cdee68d9b83cfe0fe6bec0b0a2b00b706fba82bffd026",
+    "Atlas-0.28.3-installer-tests.json": "53adc393d49ade2a4505c6d1640a3015706c016791e74265a4e0071c05efff36",
+    "install.sh": "4ac871ed2d08a01115e6dbf3fe0ca502481c2262299b1c50130f4ff9573f8773",
+    "install-release.sh": "63bc588105e12aff89e9dff8713cc112a7130a7bb02517b593e90cde58e63497",
+    "Atlas-0.28.3-report.md": "d20fae61133f49ca1441f3baaf2c3f3f456c3798fd225352b0329f1e44c0d41d"
+  }
+}

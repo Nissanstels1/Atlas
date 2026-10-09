@@ -1,0 +1,77 @@
+name: Publish Atlas installer and ARM64 packages
+on:
+  push:
+    branches: [main]
+    paths: ['releases/atlas-0.28.3/**', '.github/workflows/publish-installer.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: atlas-0283-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify packages and restore source
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib,re,zipfile,io,urllib.request
+          root=pathlib.Path('releases/atlas-0.28.3');meta=json.loads((root/'manifest.json').read_text())
+          out=pathlib.Path('publish');out.mkdir()
+          chunks=[]
+          for part in meta['parts']:
+              assert re.fullmatch(r'part-[0-9]{3}\.bin',part['name'])
+              data=(root/part['name']).read_bytes()
+              assert len(data)==part['size'] and hashlib.sha256(data).hexdigest()==part['sha256']
+              chunks.append(data)
+          data=b''.join(chunks);assert hashlib.sha256(data).hexdigest()==meta['sha256']
+          with zipfile.ZipFile(io.BytesIO(data)) as z:
+              assert z.testzip() is None
+              for name in z.namelist():
+                  assert re.fullmatch(r'[A-Za-z0-9_.+-]+',name)
+                  (out/name).write_bytes(z.read(name))
+          for line in (out/'SHA256SUMS').read_text().splitlines():
+              expected,name=line.split('  ',1)
+              assert hashlib.sha256((out/name).read_bytes()).hexdigest()==expected
+          for name,expected in meta['reuse'].items():
+              assert re.fullmatch(r'[A-Za-z0-9_.+-]+',name)
+              data=urllib.request.urlopen('https://github.com/Nissanstels1/Atlas/releases/download/v0.28.0-beta/'+name,timeout=120).read()
+              assert hashlib.sha256(data).hexdigest()==expected
+              (out/name).write_bytes(data)
+          with zipfile.ZipFile(out/'atlas-openwrt-0.28.3-beta.zip') as z:
+              for entry in z.infolist():
+                  path=pathlib.PurePosixPath(entry.filename)
+                  assert path.parts[0]=='atlas-openwrt' and '..' not in path.parts
+                  if len(path.parts)>1 and path.parts[1]=='dist':continue
+                  destination=pathlib.Path(*path.parts);destination.parent.mkdir(parents=True,exist_ok=True)
+                  destination.write_bytes(z.read(entry));destination.chmod((entry.external_attr>>16)&0o777 or 0o644)
+          assert pathlib.Path('install.sh').read_bytes()==(out/'install.sh').read_bytes()
+          assert hashlib.sha256((out/'install-release.sh').read_bytes()).hexdigest() in pathlib.Path('install.sh').read_text()
+          files=sorted(p for p in out.iterdir() if p.name!='SHA256SUMS')
+          (out/'SHA256SUMS').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in files))
+          PY
+      - name: Publish browsable source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add atlas-openwrt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Publish Atlas 0.28.3 source and installer'
+            git push origin HEAD:main
+          fi
+          echo "ATLAS_RELEASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Upload release assets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs'),tag='v0.28.3-beta';
+            let release;
+            try { release=(await github.rest.repos.getReleaseByTag({...context.repo,tag})).data; }
+            catch(e) { if(e.status!==404)throw e;release=(await github.rest.repos.createRelease({...context.repo,tag_name:tag,target_commitish:process.env.ATLAS_RELEASE_COMMIT,name:'Atlas 0.28.3 · установка одной командой · ARM64/x86_64',prerelease:true,body:fs.readFileSync('publish/Atlas-0.28.3-report.md','utf8')})).data; }
+            const old=(await github.rest.repos.listReleaseAssets({...context.repo,release_id:release.id,per_page:100})).data;
+            for(const name of fs.readdirSync('publish')) {
+              const match=old.find(x=>x.name===name);if(match)await github.rest.repos.deleteReleaseAsset({...context.repo,asset_id:match.id});
+              await github.rest.repos.uploadReleaseAsset({...context.repo,release_id:release.id,name,data:fs.readFileSync('publish/'+name)});
+            }
