@@ -107,5 +107,13 @@ class CompletedPolicies(unittest.TestCase):
     def test_failed_latest_sample_and_missing_timestamp_do_not_restore_old_node(self):
         state=sample();settings=core.validate_settings(dict(state['settings'],auto_strategy='stable'))
         nodes=core.all_nodes(state);stamp=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
-        for history in ([{'delay':10,'time':stamp},{'delay':0,'time':stamp}], [{'delay':10}]):
+        for history in ([{'delay':10,'time':stamp},{'delay':0,'time':stamp}], [{'delay':10}], [{'delay':10,'time':stamp},{'delay':20,'time':'broken'}], [{'delay':10,'time':stamp},{'delay':20,'time':'2020-01-01T00:00:00Z'}]):
             self.assertIsNone(atlas.auto_choice(nodes,settings,{nodes[0]['key']:{'history':history}}))
+
+    def test_measurement_timezone_is_respected(self):
+        state=sample();settings=core.validate_settings(dict(state['settings'],auto_strategy='stable'))
+        nodes=core.all_nodes(state)
+        stamp='2026-10-09T12:00:00+03:00'
+        import datetime
+        now=int(datetime.datetime.fromisoformat(stamp).timestamp())
+        self.assertEqual(atlas.auto_choice(nodes,settings,{nodes[0]['key']:{'history':[{'delay':10,'time':stamp}]}},now),nodes[0]['key'])

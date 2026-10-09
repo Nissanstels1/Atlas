@@ -2,6 +2,7 @@
 """Root-only backend. rpcd provides authentication; ACL grants individual methods."""
 import contextlib
 import calendar
+import datetime
 import base64
 import copy
 import fcntl
@@ -248,8 +249,10 @@ def runtime_status(nodes, running):
 
 def runtime_monitor():
     """Return a bounded, sanitized Clash API snapshot to LuCI administrators only."""
+    from resources import snapshot
+    resources = snapshot(read_json(CONFIG, {}))
     if not service_running():
-        return {'ok': True, 'available': False, 'message': 'Движок остановлен', 'connections': [], 'rules': []}
+        return {'ok': True, 'available': False, 'message': 'Движок остановлен', 'connections': [], 'rules': [], 'resources': resources}
     try:
         payload = clash_request('GET', '/connections')
         raw_connections = payload.get('connections', []) if isinstance(payload, dict) else []
@@ -295,13 +298,13 @@ def runtime_monitor():
                               'payload': text(item.get('payload', ''), 128),
                               'outbound': text(base_tag(item.get('proxy', '')), 96)})
         return {'ok': True, 'available': True, 'connections': connections, 'rules': rules,
-                'memory': process_memory(),
+                'memory': process_memory(), 'resources': resources,
                 'upload_total': payload.get('uploadTotal', 0) if type(payload.get('uploadTotal', 0)) is int else 0,
                 'download_total': payload.get('downloadTotal', 0) if type(payload.get('downloadTotal', 0)) is int else 0,
                 'truncated': len(raw_connections) > 50 or len(raw_rules) > 60}
     except (AtlasError, OSError, ValueError, TypeError, http.client.HTTPException):
         return {'ok': True, 'available': False, 'message': 'Локальный Clash API не отвечает',
-                'connections': [], 'rules': []}
+                'connections': [], 'rules': [], 'resources': resources}
 
 
 def process_memory():
@@ -362,30 +365,29 @@ def auto_choice(nodes, settings, proxies, now=None):
     now = int(now or time.time())
     preferred = settings['preferred_countries']
     reserve_order = {key:index+1 for index,key in enumerate(settings.get('urltest_fallbacks', []))}
+    def fresh_sample(sample):
+        stamp=sample.get('time')
+        if not isinstance(stamp,str) or len(stamp)>64:return False
+        try:
+            parsed=datetime.datetime.fromisoformat(stamp.replace('Z','+00:00'))
+            if parsed.tzinfo is None:return False
+            age=now-int(parsed.timestamp())
+            return -60<=age<=max(180,settings['auto_interval_seconds']*3)
+        except (TypeError,ValueError,OverflowError,OSError):return False
     candidates = []
     for node in nodes:
         proxy = proxies.get(node['key'], {}) if isinstance(proxies, dict) else {}
         history = proxy.get('history', []) if isinstance(proxy, dict) else []
         if not isinstance(history, list) or not history or not isinstance(history[-1], dict) or type(history[-1].get('delay')) is not int or not 0 < history[-1]['delay'] <= 60000:
             continue
+        if not fresh_sample(history[-1]):continue
         delays = []
         for sample in history[-5:] if isinstance(history, list) else []:
             if not isinstance(sample, dict) or type(sample.get('delay')) is not int:
                 continue
             if not 0 < sample['delay'] <= 60000:
                 continue
-            # Clash API emits RFC3339 timestamps. Reject stale measurements when parseable.
-            stamp = sample.get('time')
-            if not isinstance(stamp, str) or not stamp:
-                continue
-            if stamp:
-                try:
-                    parsed = time.strptime(stamp[:19], '%Y-%m-%dT%H:%M:%S')
-                    age = now - int(calendar.timegm(parsed))
-                    if age < -60 or age > max(180, settings['auto_interval_seconds'] * 3):
-                        continue
-                except (TypeError, ValueError, OverflowError):
-                    continue
+            if not fresh_sample(sample):continue
             delays.append(sample['delay'])
         if not delays:
             continue
@@ -1859,12 +1861,13 @@ def dispatch(method, args):
         elif method == 'export_backup':
             return {'ok': True, 'backup': make_backup(current)}
         elif method == 'diagnostic_report':
+            from resources import snapshot
             checks = read_json(RUN / 'checks.json', {})
             report = {'format': 'atlas-diagnostics', 'schema': 1, 'version': VERSION,
                 'at': int(time.time()), 'engine': engine_version(), 'running': service_running(),
                 'source_count': len(current['subscriptions']), 'node_count': len(all_nodes(current)),
                 'section_count': len(current['settings']['sections']),
-                'list_count': len(current['settings']['remote_lists']), 'memory': process_memory(),
+                'list_count': len(current['settings']['remote_lists']), 'memory': process_memory(), 'resources': snapshot(read_json(CONFIG, {})),
                 'mode': current['settings']['mode'], 'fakeip': current['settings']['fakeip'],
                 'kill_switch_configured': current['settings']['kill_switch'], 'kill_switch_active': kill_switch_active(),
                 'dnsmasq_configured': current['settings']['dhcp_dns_enabled'], 'dnsmasq_active': dhcp_dns_active(),

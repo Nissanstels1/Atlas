@@ -5,6 +5,29 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'root/usr/lib/atlas'))
 from download_policy import DownloadPolicy,MAX_PROOFS
 
 class DownloadProofs(unittest.TestCase):
+    def test_proof_can_expire_while_other_groups_are_checked(self):
+        with mock.patch('download_policy.time.monotonic',return_value=0) as clock:
+            check=mock.Mock(return_value={'ok':True,'received':65536})
+            first=DownloadPolicy({},'launch',check,100)
+            first.choose([{'key':'a'}],self.settings(),{},None,self.rank)
+            policy=DownloadPolicy(first.export(1),'launch',check,399)
+            clock.return_value=2
+            check.reset_mock()
+            self.assertEqual(policy.choose([{'key':'a'}],self.settings(),{},'a',self.rank)[1],'verified')
+            check.assert_called_once()
+            self.assertEqual(next(iter(policy.proofs.values())),401)
+
+    def test_transfer_after_deadline_is_rejected_and_not_saved(self):
+        with mock.patch('download_policy.time.monotonic',return_value=0) as clock:
+            def check(*args):clock.return_value=23;return {'ok':True,'received':65536}
+            policy=DownloadPolicy({},'launch',check,100)
+            self.assertEqual(policy.choose([{'key':'a'}],self.settings(),{},None,self.rank)[0],'policy-block')
+            self.assertEqual(policy.export(1)['proofs'],{})
+    def test_invalid_rank_cannot_loop_on_unchanged_candidates(self):
+        check=mock.Mock(return_value={'ok':False})
+        policy=DownloadPolicy({},'launch',check,100)
+        self.assertEqual(policy.choose([{'key':'a'}],self.settings(),{},None,lambda *args:'missing'),('policy-block','no-candidate'))
+        check.assert_not_called()
     def settings(self):return {'urltest_download_url':'https://example.com/data'}
     def rank(self,nodes,*args):return nodes[0]['key'] if nodes else None
     def test_truncated_and_failed_primary_choose_next_without_direct_fallback(self):

@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-atlas
-PKG_VERSION:=0.28.0
+PKG_VERSION:=0.28.3
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKGARCH:=all

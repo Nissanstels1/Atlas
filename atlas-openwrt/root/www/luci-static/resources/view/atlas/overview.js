@@ -62,7 +62,7 @@ return view.extend({
         var self = this;
         poll.add(function() {
             var status = result(api.status());
-            var monitor = self.tab === 'monitor' && !self.readonly ? result(api.monitor()).catch(function(e) {
+            var monitor = self.tab === 'monitor' && !self.readonly ? self.requestMonitor().catch(function(e) {
                 return { ok: true, available: false, message: e.message || 'Монитор недоступен', connections: [], rules: [] };
             }) : Promise.resolve(null);
             return Promise.all([status, monitor]).then(function(values) {
@@ -103,11 +103,16 @@ return view.extend({
         var self = this;
         return result(api.action(operation, id || '')).then(function() { return self.reload(); });
     },
+    requestMonitor: function() {
+        var self = this;
+        if (!self.monitorRequest) self.monitorRequest = result(api.monitor()).finally(function() { self.monitorRequest = null; });
+        return self.monitorRequest;
+    },
     navigate: function(tab) {
         this.tab = tab;
         if (tab === 'monitor' && !this.readonly) {
             var self = this;
-            result(api.monitor()).then(function(m) { self.monitor = m; if (self.tab === 'monitor') self.draw(); })
+            self.requestMonitor().then(function(m) { self.monitor = m; if (self.tab === 'monitor') self.draw(); })
                 .catch(function(e) { self.monitor = { available: false, message: e.message || 'Монитор недоступен', connections: [], rules: [] }; self.draw(); });
         }
         this.draw();
@@ -664,10 +669,10 @@ return view.extend({
             node('p', 'at-footnote', label('Atlas управляет собственным экземпляром sing-box. Одновременная работа с Podkop, Passwall или OpenClash блокируется. Ссылка подписки не показывается в статусе или журнале Atlas.'))]);
     },
     monitorPage: function() {
-        var self = this, m = self.monitor || {}, connections = m.connections || [], rules = m.rules || [];
+        var self = this, m = self.monitor || {}, connections = m.connections || [], rules = m.rules || [], resources = m.resources || {}, cache = resources.cache || {}, system = resources.system || {};
         return node('div', 'at-content', [
             self.sectionHead('Монитор соединений', 'Снимок локального API sing-box. Данные доступны только администраторам LuCI и не отправляются наружу.',
-                self.button('Обновить', function() { return result(api.monitor()).then(function(data) { self.monitor = data; self.draw(); }); }, 'small', self.busy())),
+                self.button('Обновить', function() { return self.requestMonitor().then(function(data) { self.monitor = data; self.draw(); }); }, 'small', self.busy())),
             !m.available ? node('div', 'at-notice', label(m.message || 'Загрузка данных монитора…')) : label(''),
             node('div', 'at-stats', [
                 self.stat('СОЕДИНЕНИЯ', String(connections.length), m.truncated ? 'Часть потоков и правил скрыта' : 'Активные потоки'),
@@ -675,6 +680,13 @@ return view.extend({
                 self.stat('ПОЛУЧЕНО', bytes(m.download_total), 'Счётчик процесса sing-box'),
                 self.stat('ПАМЯТЬ', m.memory && m.memory.inuse ? bytes(m.memory.inuse) : '—', m.memory && m.memory.oslimit ? 'лимит ' + bytes(m.memory.oslimit) : 'sing-box')
             ]),
+            node('div', 'at-stats', [
+                self.stat('КЭШ', typeof cache.size_bytes === 'number' ? bytes(cache.size_bytes) : '—', 'Размер базы на диске'),
+                self.stat('СВОБОДНО', typeof cache.free_bytes === 'number' ? bytes(cache.free_bytes) : '—', 'На разделе кэша'),
+                self.stat('ДОСТУПНАЯ RAM', typeof system.available_bytes === 'number' ? bytes(system.available_bytes) : '—', 'Для всей системы')
+            ]),
+            node('div', '', (resources.warnings || []).map(function(warning) { return node('div', 'at-notice', label(warning)); })),
+            node('p', 'at-footnote', label('Снимок обновляется, пока открыт монитор. Большой кэш сам по себе не доказывает утечку; автоматическая очистка не выполняется, чтобы сохранить действующие FakeIP-сопоставления.')),
             node('section', 'at-card at-padded', [node('h3', '', label('Активные соединения')),
                 connections.length ? node('div', 'at-table-wrap', [node('table', 'at-table', [
                     node('thead', '', [node('tr', '', ['Назначение','Источник','Протокол','Маршрут','Трафик'].map(function(x) { return node('th', '', label(x)); }))]),

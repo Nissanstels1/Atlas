@@ -174,6 +174,11 @@ const root=path.resolve(__dirname,'..');
   await page.locator('.at-max-active').selectOption('0');
   await page.getByRole('button',{name:'Сохранить настройки',exact:true}).click();
   await page.waitForFunction(()=>window.state.settings.max_active_nodes===0);
+  await page.evaluate(()=>{window.app.monitor={available:false,message:'Движок остановлен',resources:{cache:{size_bytes:68157440,free_bytes:4194304},system:{available_bytes:32768000},warnings:['Кэш достиг 64 МиБ']}};window.app.tab='monitor';window.app.draw();});
+  if(!(await page.locator('body').innerText()).includes('КЭШ') || !(await page.locator('body').innerText()).includes('Кэш достиг 64 МиБ'))throw Error('Stopped-engine resource snapshot missing');
+  if(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth))throw Error('Resource monitor mobile overflow');
+  await page.setViewportSize({width:1440,height:1000});
+  if(!(await page.locator('body').innerText()).includes('ДОСТУПНАЯ RAM'))throw Error('Resource memory display missing');
   if(errors.length)throw Error(errors.join('\n'));
   console.log('PASS: browser section exceptions, cloning, preview/validation, route explanation, autostart, existing settings, desktop/mobile. Router RPC was mocked.');
  } finally {await browser.close();}
