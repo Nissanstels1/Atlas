@@ -29,7 +29,8 @@ if ! /usr/libexec/rpcd/atlas list > "$directory/methods.json"; then
 fi
 /usr/bin/python3 -c 'import json,sys; methods=json.load(open(sys.argv[1])); sys.exit(0 if isinstance(methods,dict) and "status" in methods else 1)' "$directory/methods.json" || { echo 'Atlas backend returned invalid RPC methods.'; exit 1; }
 attempt=0
-while [ "$attempt" -lt 5 ]; do
+# procd can take 10 seconds to stop the previous rpcd before registering plugins.
+while [ "$attempt" -lt 30 ]; do
     objects=$(ubus list atlas 2>/dev/null || true)
     if [ "$objects" = atlas ]; then
         echo 'Atlas backend verified: RPC object atlas is registered.'
