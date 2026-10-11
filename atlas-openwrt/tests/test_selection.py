@@ -152,6 +152,20 @@ class AutoSelection(unittest.TestCase):
         with self.assertRaises(core.AtlasError):core.make_config(sample(),api_secret='')
 
 class RuntimeObservation(unittest.TestCase):
+    def test_live_measurements_follow_engine_history_without_manual_check(self):
+        first=atlas.runtime_measurements(self.reply,self.nodes)
+        self.assertEqual(first[self.ee]['latency_ms'],62)
+        self.reply[self.ee]['history'].append({'delay':49,'time':'2026-09-22T12:01:00Z'})
+        latest=atlas.runtime_measurements(self.reply,self.nodes)
+        self.assertEqual(latest[self.ee],{'latency_ms':49,'checked_at':'2026-09-22T12:01:00Z','ok':True})
+        self.reply[self.ee]['history'].append({'delay':0,'time':'2026-09-22T12:02:00Z'})
+        self.assertFalse(atlas.runtime_measurements(self.reply,self.nodes)[self.ee]['ok'])
+
+    def test_live_measurements_ignore_unknown_and_malformed_profiles(self):
+        self.reply[self.de]={'history':[{'delay':True,'time':'invalid'}]}
+        self.reply['unknown']={'history':[{'delay':33,'time':'2026-09-22T12:01:00Z'}]}
+        self.assertEqual(set(atlas.runtime_measurements(self.reply,self.nodes)),{self.ee})
+
     def setUp(self):
         self.nodes=core.all_nodes(sample());self.ee=self.nodes[0]['key'];self.de=self.nodes[1]['key']
         self.reply={'proxy':{'now':'auto'},'auto':{'now':self.ee,'all':[self.ee,self.de]},

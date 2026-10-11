@@ -47,9 +47,14 @@ function atlasElement(tag, attrs, children) {
 }
 function node(tag, cls, children, attrs) {
     var element=atlasElement(tag, Object.assign({ 'class': cls || '' }, attrs || {}), children);
+    if(tag==='table' && cls==='at-table') {
+        var headings=Array.from(element.querySelectorAll('thead th')).map(function(x){return x.textContent;});
+        Array.from(element.querySelectorAll('tbody tr')).forEach(function(row){Array.from(row.children).forEach(function(cell,i){cell.setAttribute('data-label',headings[i] || '');});});
+    }
     if(tag==='label' && cls==='at-checkbox') {
-        var title=element.textContent,help=atlasHelpBox(title);
+        var title=element.textContent;
         var control=Array.from(element.children || []).find(function(x){return (x.tagName || x.tag || '').toLowerCase()==='input';});
+        var help=atlasHelpBox(title,null,control);
         if(control)control.addEventListener('change',function(){help.open=true;});
         // Keep interactive disclosures outside labels: opening help must not
         // accidentally toggle the checkbox, and help needs its own full row.
@@ -60,6 +65,7 @@ function node(tag, cls, children, attrs) {
 function label(t) { return document.createTextNode(String(t)); }
 function pill(t, cls) { return node('span', 'at-pill ' + (cls || ''), label(t)); }
 function date(t) { return t ? new Date(t * 1000).toLocaleString('ru-RU') : 'Ещё не обновлялась'; }
+function liveDate(t) { return t ? new Date(t).toLocaleString('ru-RU') : 'Нет замера'; }
 function bytes(n) {
     n = Number(n || 0);
     return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' ГиБ' : (n / 1048576).toFixed(1) + ' МиБ';
@@ -155,9 +161,20 @@ function atlasHelp(title,hint) {
     var entry=entries.find(function(e){return e[0].test(title);});
     return {body:(hint ? hint+' ' : '')+(entry ? entry[1] : 'Этот параметр изменяет указанное поведение Atlas. Если базовая настройка работает, сначала сохраните резервную копию и меняйте по одному параметру, проверяя результат.'),example:entry ? entry[2] : 'Настройте отдельную группу для нужных сайтов, сохраните и проверьте маршрут перед применением.'};
 }
-function atlasHelpBox(title,hint) {
+function atlasHelpBox(title,hint,control) {
     var help=atlasHelp(title,hint);
-    return atlasElement('details',{'class':'at-help'},[atlasElement('summary',{'aria-label':'Пояснение: '+title},'Что это и как выбрать?'),node('p','',label(help.body)),node('p','at-help-example',label('Пример: '+help.example))]);
+    var current=node('p','at-help-current');
+    function describe(){
+        if(!control)return;
+        var type=(control.type || (control.getAttribute && control.getAttribute('type')) || '').toLowerCase();
+        if(type==='password'){current.textContent='Данные доступа скрыты. Если оставить поле без изменений, используется сохранённое значение; заменяйте его только по инструкции провайдера.';return;}
+        if((control.tagName || control.tag || '').toLowerCase()==='textarea'){current.textContent=String(control.value || '').trim() ? 'Сейчас поле заполнено. Оставить как есть — сохранить этот список или конфигурацию. Удаление записей уберёт соответствующие условия после сохранения и применения; ниже описано назначение поля.' : 'Сейчас список пустой. Он не добавляет отдельных записей. Ниже описано, какие записи можно добавить и как они повлияют на маршрут.';return;}
+        if(type==='checkbox'){current.textContent='Сейчас: '+(control.checked ? 'включено. Эта возможность будет использоваться после сохранения и применения. Снять галочку — выключить её.' : 'выключено. Эта возможность не используется. Поставить галочку — включить её после сохранения и применения.');return;}
+        var value=control.options && control.selectedIndex>=0 ? control.options[control.selectedIndex].textContent : String(control.value || '');
+        current.textContent=value ? 'Сейчас выбрано: '+value.slice(0,180)+'. Если оставить как есть, эта настройка сохранится. Что именно она делает и когда стоит менять — объяснено ниже.' : 'Сейчас поле пустое. Значение по умолчанию или отсутствие ограничения описано ниже. Не заполняйте поле, если вам не нужна эта дополнительная настройка.';
+    }
+    describe();if(control && control.addEventListener){control.addEventListener('change',describe);control.addEventListener('input',describe);}
+    return atlasElement('details',{'class':'at-help'},[atlasElement('summary',{'aria-label':'Пояснение: '+title},'Что сейчас настроено и что изменится?'),current,node('p','',label(help.body)),node('p','at-help-example',label('Пример: '+help.example))]);
 }
 
 return view.extend({
@@ -195,7 +212,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=adaptive-20261011-2' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=layout-live-20261011' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -295,7 +312,7 @@ return view.extend({
         return panel;
     },
     overviewPage: function() {
-        var self = this, d = self.data, checks = d.checks || {};
+        var self = this, d = self.data, checks = d.checks || {}, measured = (d.runtime || {}).measurements || {};
         var measured = d.nodes.filter(function(n) { return checks[n.key] && checks[n.key].ok; });
         var healthy = measured.length;
         var selected = d.runtime && d.runtime.blocked ? (d.runtime.reason === 'no-main-pool' ? d.runtime.message : 'Заблокирован критериями выбора') : d.runtime && d.runtime.available && d.runtime.selected ? d.runtime.name : 'Выбор движка пока неизвестен';
@@ -409,22 +426,23 @@ return view.extend({
             node('div', 'right', [atlasElement('button', { 'class': 'btn', click: ui.hideModal }, 'Отмена'), self.button('Удалить', function() { return result(api.deleteSubscription(sub.id)).then(function() { ui.hideModal(); return self.reload(); }); }, 'danger')])]);
     },
     nodesPage: function() {
-        var self = this, d = self.data, checks = d.checks || {};
+        var self = this, d = self.data, checks = d.checks || {}, measured = (d.runtime || {}).measurements || {};
         var search = node('input', 'at-input at-search', [], { placeholder: 'Поиск сервера или подписки…', value: self.search, 'aria-label': 'Поиск сервера', focus: function() { self.searchFocused = true; }, blur: function() { self.searchFocused = false; } });
         var container = node('div', 'at-table-wrap');
         function table() {
             var list = d.nodes.filter(function(n) { return (n.name + ' ' + n.subscription).toLowerCase().indexOf(self.search.toLowerCase()) >= 0; });
             container.replaceChildren(node('table', 'at-table', [node('thead', '', node('tr', '', ['Сервер', 'Протокол', 'Страна выхода', 'Подписка', 'HTTPS проверка', 'Выбор'].map(function(t) { return node('th', '', label(t)); }))),
                 node('tbody', '', list.map(function(n) {
-                    var c = checks[n.key];
-                    return node('tr', d.runtime && d.runtime.selected === n.key ? 'selected' : '', [node('td', '', [node('strong', '', label(n.name)), node('small', '', label(n.server + ':' + n.port)), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label(''), d.runtime && d.runtime.selected === n.key ? pill('Используется движком', 'success') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', [pill(!c ? 'Не проверен' : c.ok ? c.latency_ms + ' мс' : c.stage === 'engine' ? 'Не удалось проверить' : 'Не прошёл', !c || c.stage === 'engine' ? 'neutral' : c.ok ? 'success' : 'danger'), c ? node('small', '', label(date(c.checked))) : label(''), c && c.error ? node('small', '', label(c.error)) : label('')]), node('td', '', self.button(d.settings.selected === n.key ? 'Выбран' : 'Выбрать', function() { var s = Object.assign({}, d.settings, { selected: n.key }); return result(api.saveSettings(s)).then(function() { return d.running ? self.action('apply') : self.reload(); }); }, 'small', self.busy() || n.eligible === false || d.settings.selected === n.key))]);
+                    var c = checks[n.key], live=measured[n.key];
+                    var measurement=node('div','at-measurement',[node('strong','',label('Автоматический замер')),pill(live ? live.ok ? live.latency_ms+' мс' : 'Не прошёл' : 'Нет замера',live ? live.ok ? 'success' : 'danger' : 'neutral'),node('small','',label(live ? liveDate(live.checked_at) : n.eligible === false ? 'Профиль исключён фильтрами' : 'Профиль может не входить в активный пул')),node('small','',label('Ручной HTTPS-тест: '+(!c ? 'не запускался' : c.ok ? c.latency_ms+' мс · '+date(c.checked) : 'не прошёл · '+date(c.checked))),{'title':c && c.error || ''})]);
+                    return node('tr', d.runtime && d.runtime.selected === n.key ? 'selected' : '', [node('td', '', [node('strong', '', label(n.name)), node('small', '', label(n.server + ':' + n.port)), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label(''), d.runtime && d.runtime.selected === n.key ? pill('Используется движком', 'success') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', self.button(d.settings.selected === n.key ? 'Выбран' : 'Выбрать', function() { var s = Object.assign({}, d.settings, { selected: n.key }); return result(api.saveSettings(s)).then(function() { return d.running ? self.action('apply') : self.reload(); }); }, 'small', self.busy() || n.eligible === false || d.settings.selected === n.key))]);
                 }))]));
             if (!list.length) container.appendChild(self.empty('Серверов нет', d.nodes.length ? 'Попробуйте другой запрос.' : 'Добавьте и обновите подписку.'));
         }
         search.addEventListener('input', function() { self.search = search.value; table(); }); table();
         var eligible = d.nodes.filter(function(n) { return n.eligible !== false; }).length;
         var runtime = d.runtime || {};
-        return node('div', 'at-content', [self.sectionHead('Доступные серверы', 'HTTPS проверка выполняется через узлы, прошедшие фильтры.', self.button('Проверить серверы', function() { return self.action('probe'); }, 'primary', self.busy() || !eligible)),
+        return node('div', 'at-content', [self.sectionHead('Доступные серверы', 'Автоматические замеры обновляются работающим движком для профилей активного пула. Ручной HTTPS-тест запускается кнопкой и показан отдельно. Выбор учитывает фильтры, подписку секции и допустимую разницу задержки; 60 секунд — заданный интервал, а не гарантия нового результата при недоступной сети.', self.button('Проверить серверы', function() { return self.action('probe'); }, 'primary', self.busy() || !eligible)),
             node('p', 'at-footnote', label('Проверка страны выполняет HTTPS запрос через выбранный профиль к ipapi.co. Сервис видит выходной IP; Atlas сохраняет только код страны и время. При изменении страны фильтры применяются заново; если допустимых серверов нет, туннель останавливается с fail-closed.')),
             node('div', 'at-auto-card', [node('div', '', [node('strong', '', label('Автовыбор и фильтры')), node('p', '', label('Пинг: ' + (d.settings.auto_strategy || 'fastest') + ' · допущено ' + eligible + ' из ' + d.nodes.length)), node('p', '', label('Разрешённые страны: ' + ((d.settings.countries || []).join(', ') || 'все') + ' · исключены: ' + ((d.settings.excluded_countries || []).join(', ') || 'нет') + ' · ' + (d.settings.selected === 'auto' ? 'автоматический режим' : 'ручной выбор')))]), self.button('Настроить автовыбор', function() { self.autoDialog(); }, '', self.busy())]),
             node('section', 'at-card at-padded', [node('h3', '', label('Фактически выбран движком')), node('p', 'at-runtime-name', label(runtime.available && runtime.selected ? runtime.name : runtime.message || 'Данные движка недоступны')), runtime.selected ? node('p', 'at-footnote', label((runtime.automatic || d.settings.selected === 'auto' ? 'Автоматический режим' : 'Вручную') + ' · в активной группе: ' + runtime.candidate_count + (runtime.last_delay_ms ? ' · последний замер: ' + runtime.last_delay_ms + ' мс (' + runtime.last_check + ')' : ''))) : label(''), node('p', 'at-footnote', label('Выбор узла сам по себе не подтверждает доступность соединения. После изменения настроек активная группа обновляется при применении.'))]),
@@ -496,7 +514,7 @@ return view.extend({
         var element=atlasElement('details',{},[atlasElement('summary',{},'Резервные серверы и проверка скачивания'),node('p','at-footnote',label('Резерв используется по порядку, когда нет основного сервера, подходящего по свежим замерам и вашим критериям. После восстановления группа возвращается к основным. Резервные серверы совместимы с приоритетом стран и порогами пинга. Проверка скачивания совместно с критериями Atlas требует Atlas Engine r3; перед переключением проверяется передача 64 КиБ через выбранный сервер. Для расширений нужен Atlas Engine.')),list,self.button('Добавить резервный сервер',function(){var available=(self.data.nodes || []).find(function(n){return reserves.indexOf(n.key)<0;});if(available){reserves.push(available.key);redraw();}},'ghost',features.indexOf('urltest.fallbacks')<0),self.field('Проверка скачивания 64 КиБ перед переключением',mode),self.field('Адрес файла для проверки',url),node('p','at-footnote',label('Расширения установленного движка: '+(features.join(', ') || 'не обнаружены')+'. Штатный sing-box сохраняет прежнее поведение. Сохранённые неподдерживаемые настройки требуют совместимого движка или очистки.'))]);
         return {element:element,values:function(){return {urltest_fallbacks:reserves.slice(),urltest_download_check:mode.value,urltest_download_url:mode.value==='custom' ? url.value.trim() : ''};}};
     },
-    field: function(title,input,hint) { var help=atlasHelpBox(title,hint);if(input.setAttribute)input.setAttribute('aria-label',title);if(input.addEventListener)input.addEventListener('change',function(){help.open=true;});return node('div','at-field',[node('span','',label(title)),input,hint ? node('small','',label(hint)) : label(''),help]); },
+    field: function(title,input,hint) { var help=atlasHelpBox(title,hint,input);if(input.setAttribute)input.setAttribute('aria-label',title);if(input.addEventListener)input.addEventListener('change',function(){help.open=true;});return node('div','at-field',[node('span','',label(title)),input,hint ? node('small','',label(hint)) : label(''),help]); },
 
     cloneSectionDialog: function(section) {
         var self=this,name=node('input','at-input at-clone-name',[],{value:(section.name+' копия').slice(0,48),maxlength:48});

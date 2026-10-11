@@ -242,11 +242,27 @@ def runtime_status(nodes, running):
                                'selected': member['key'] if member else None,
                                'name': member['name'] if member else 'Заблокирован' if current == 'policy-block' else 'Выбор пока неизвестен'})
         result['groups'] = groups
+        result['measurements'] = runtime_measurements(proxies, nodes)
         return result
     except (AtlasError, OSError, ValueError, TypeError, AttributeError, http.client.HTTPException):
         return {'available': False, 'message': 'Нет ответа от движка; выбранный узел неизвестен'}
     finally:
         connection.close()
+
+
+def runtime_measurements(proxies, nodes):
+    """Expose only bounded measurements for known profiles, without API secrets."""
+    measured = {}
+    for node in nodes:
+        history = proxies.get(node['key'], {}).get('history', [])
+        if not isinstance(history, list) or not history or not isinstance(history[-1], dict):
+            continue
+        last = history[-1]
+        delay = last.get('delay')
+        stamp = last.get('time')
+        if type(delay) is int and 0 <= delay <= 60000 and isinstance(stamp, str):
+            measured[node['key']] = {'latency_ms': delay, 'checked_at': stamp[:64], 'ok': delay > 0}
+    return measured
 
 
 def runtime_monitor():
