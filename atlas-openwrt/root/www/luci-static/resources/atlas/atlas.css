@@ -45,3 +45,22 @@
 }
 @container(max-width:420px){.atlas .at-table tr{grid-template-columns:minmax(0,1fr)}.atlas .at-table td:first-child{grid-column:auto}}
 @media(max-width:650px){.atlas .at-actions>.at-btn,.at-modal .at-actions>.at-btn{flex:1 1 100%;min-width:0}.atlas .at-btn,.at-modal .at-btn{max-width:100%;min-width:0;word-break:normal}}
+
+/* Keep adaptive rows compact, with enough room for complete button labels. */
+@container (max-width:900px) and (min-width:521px){
+ .atlas .at-table tr{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 12px;padding:12px}
+ .atlas .at-table td{padding:6px}
+ .atlas .at-table td:nth-child(5){grid-column:span 2}
+ .atlas .at-table td:last-child{align-self:center}
+ .atlas .at-table td::before{margin-bottom:4px}
+}
+@container (max-width:520px){
+ .atlas .at-table tr{grid-template-columns:repeat(2,minmax(0,1fr));padding:8px;gap:4px}
+ .atlas .at-table td{padding:6px}
+ .atlas .at-table td:first-child,.atlas .at-table td:nth-child(5){grid-column:1/-1}
+ .atlas .at-table td::before{margin-bottom:4px}
+}
+.atlas .at-table td small{margin-top:4px;line-height:1.45}
+.atlas .at-measurement strong{display:block;font-size:13px;margin-bottom:4px}
+.atlas .at-table td .at-btn{padding:9px 12px;font-size:13px;min-height:36px}
+.atlas .at-table td{vertical-align:top}

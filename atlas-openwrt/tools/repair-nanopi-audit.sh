@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0,'/usr/lib/atlas')
 from version import VERSION
 if VERSION!='0.29.0':raise SystemExit('This repair requires Atlas 0.29.0; no files changed.')
-files={'root/usr/lib/atlas/atlas.py': 'cf332d1d088bd9b352638a125f4882db2524bb04bbf9ba7be2dedf1665c37bb7', 'root/usr/lib/atlas/core.py': 'c659952489c1cf356a6b77f6276e97db99b5428157c831103544f4ad8f7a645f', 'root/usr/lib/atlas/public_dns.py': '4b89247d875dfd71d8c96de5d8b124d612afa0d47b5374af7c7a1e68e59b895d', 'root/www/luci-static/resources/view/atlas/overview.js': '6921a059da693eea7d6b187cf84b2b9ebd317a6ae58af43d451102e8d336630d', 'root/www/luci-static/resources/atlas/atlas.css': 'a1a73000015cc407d5c8d3d2959934e2818d9e58b3e7fcaaf80d0e0d4c44e860'}
+files={'root/usr/lib/atlas/atlas.py': 'cf332d1d088bd9b352638a125f4882db2524bb04bbf9ba7be2dedf1665c37bb7', 'root/usr/lib/atlas/core.py': 'c659952489c1cf356a6b77f6276e97db99b5428157c831103544f4ad8f7a645f', 'root/usr/lib/atlas/public_dns.py': '4b89247d875dfd71d8c96de5d8b124d612afa0d47b5374af7c7a1e68e59b895d', 'root/www/luci-static/resources/view/atlas/overview.js': '3619437d979060aba72599c4cd191bbc07cbba9c7b87ecc886af9fde74837e74', 'root/www/luci-static/resources/atlas/atlas.css': '8d0c57821cbad76dab4a7d06fb3b72bca2bf3bedb07f85f2efc82d274134683c'}
 directory=Path(sys.argv[1]);backup=Path('/etc/atlas/audit-repair-original')
 backup.mkdir(mode=0o700,exist_ok=True)
 staged=[]

@@ -44,6 +44,12 @@ const all=n=>[n,...n.children.flatMap(all)];
  for(const t of ['overview','subscriptions','nodes','routing','privacy','monitor','settings']){app.navigate(t);assert(app.root.children.length===2,t+' failed');}
  data.subscriptions=[{id:'a'.repeat(16),name:'<img src=x onerror=alert(1)>',host:'example.com',count:1,enabled:true,metadata:{}}];
  data.nodes=[{key:'a'.repeat(32),name:'Node',subscription:'Test',type:'vless',server:'example.com',port:443}];
+ data.runtime={measurements:{['a'.repeat(32)]:{ok:true,latency_ms:50,checked_at:'2000-01-01T00:00:00Z'}}};
+ app.data=data;app.navigate('nodes');
+ assert(app.root.textContent.includes('Замер устарел'),'Old successful measurement was presented as current');
+ data.runtime.measurements['a'.repeat(32)].checked_at=new Date().toISOString();app.draw();
+ assert(app.root.textContent.includes('50 мс')&&!app.root.textContent.includes('Замер устарел'),'Fresh measurement was not displayed');
+ data.runtime={};
  app.data=data;
  let sectionSaved=null,listsSaved=null;
  const sampleSection={id:'b'.repeat(16),name:'Видео',policy:'proxy',domains:['youtube.com']};
