@@ -93,6 +93,17 @@ class AutoSelection(unittest.TestCase):
         s=sample();s['settings'].update(countries=['EE','DE'],include_names=['HOSTSLIM','FAST'],exclude_names=['hostslim'])
         self.assertEqual([n['name'] for n in core.selection_nodes(s)],['🇩🇪 DE Fast'])
 
+    def test_lte_substring_filters_both_modes(self):
+        s=sample()
+        names=['DE LTE Fast','NL lte backup','EE ordinary']
+        for n,name in zip(s['subscriptions'][0]['nodes'],names):n['name']=name
+        s['settings']['exclude_names']=['LTE']
+        self.assertEqual([n['name'] for n in core.selection_nodes(s)],names[2:])
+        s['settings'].update(exclude_names=[],include_names=['LTE'])
+        self.assertEqual([n['name'] for n in core.selection_nodes(s)],names[:2])
+        s['settings']['exclude_names']=['lte']
+        with self.assertRaises(core.AtlasError):core.make_config(s)
+
     def test_protocol_filter_and_country_are_combined(self):
         s=sample();s['settings'].update(countries=['EE'],protocols=['trojan'])
         with self.assertRaises(core.AtlasError):core.make_config(s)

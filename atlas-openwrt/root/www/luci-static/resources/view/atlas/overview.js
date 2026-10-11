@@ -38,7 +38,12 @@ function atlasElement(tag, attrs, children) {
     ['disabled', 'checked', 'selected', 'readonly', 'multiple', 'required', 'autofocus', 'hidden'].forEach(function(key) {
         if (attributes[key] === false) delete attributes[key];
     });
-    return E(tag, attributes, children == null ? [] : children);
+    // LuCI E() accepts a flat child list. Nested arrays otherwise become
+    // literal "[object HTMLDivElement]" text and their controls disappear.
+    var flattened=[];
+    function append(child){if(Array.isArray(child))child.forEach(append);else if(child!=null)flattened.push(child);}
+    append(children);
+    return E(tag, attributes, flattened);
 }
 function node(tag, cls, children, attrs) {
     var element=atlasElement(tag, Object.assign({ 'class': cls || '' }, attrs || {}), children);
@@ -332,7 +337,7 @@ return view.extend({
                 return node('article', 'at-card at-sub-card', [self.subscriptionRow(s),
                     node('dl', 'at-details', [node('dt', '', label('ID пула')), node('dd', '', label(s.id)), node('dt', '', label('Формат')), node('dd', '', label(s.format || 'Не определён')), node('dt', '', label('Обновлено')), node('dd', '', label(date(s.updated))), node('dt', '', label('Трафик')), node('dd', '', label(bytes(used) + (meta.total > 0 ? ' / ' + bytes(meta.total) : ' · лимит не указан'))), node('dt', '', label('Срок действия')), node('dd', '', label(meta.expire > 0 ? date(meta.expire) : 'Провайдер не указал'))]),
                     s.headers_set ? node('p', 'at-footnote', label('Для запроса настроены приватные HTTP-заголовки.')) : label(''),
-                    s.change ? node('p', 'at-footnote', label('Изменение: +' + s.change.added + ' / −' + s.change.removed + ' профилей; всего ' + s.change.total + (s.change.unchanged ? ' · без изменений' : ''))) : label(''),
+                    s.change && Number.isFinite(s.change.added) && Number.isFinite(s.change.removed) && Number.isFinite(s.change.total) ? node('p', 'at-footnote', label('Изменение: +' + s.change.added + ' / −' + s.change.removed + ' профилей; всего ' + s.change.total + (s.change.unchanged ? ' · без изменений' : ''))) : label(''),
                     s.error ? node('p', 'at-inline-error', label(s.error)) : label(''),
                     (s.warnings || []).length ? node('p', 'at-inline-error', label('Пропущено узлов: ' + s.warnings.length + '. Проверьте формат у провайдера.')) : label(''),
                     node('div', 'at-actions at-card-footer', [s.source === 'local' ? self.button('Редактировать JSON', function() { return result(api.getProfiles(s.id)).then(function(r) { self.localProfilesDialog(s, r.content); }); }, '', self.busy()) : label(''), s.source === 'local' ? self.button(s.enabled ? 'Выключить' : 'Включить', function() { return result(api.saveSubscription(s.id, s.name, '', !s.enabled, '', false)).then(function() { return self.reload(); }); }, '', self.busy()) : self.button('Изменить', function() { self.subscriptionDialog(s); }, '', self.busy()), self.button('Удалить', function() { self.deleteDialog(s); }, 'danger-link', self.busy())])]);
@@ -448,8 +453,8 @@ return view.extend({
             node('div', 'at-grid-2', [self.field('Минимальный пинг, мс', minPing, '0 — без минимума.'), self.field('Максимальный пинг, мс', maxPing, '0 — без максимума; профили выше порога исключаются.')]),
             self.field('HTTPS адрес для проверки пинга', testUrl, 'Измеряется TLS/HTTP ответ через каждый прокси.'), extensions.element,
             self.field('Протоколы', protocols, 'vless, vmess, trojan, shadowsocks, hysteria2, tuic, socks, http'),
-            self.field('Название содержит', include, 'Любое из значений; пусто — без ограничения.'),
-            self.field('Исключить по названию', exclude, 'Любое совпадение исключает узел. Без регулярных выражений.'),
+            self.field('Название содержит', include, 'Оставить только профили с указанным текстом в названии. Например LTE — останутся только LTE. Несколько значений через запятую: достаточно любого совпадения. Регистр не важен. Пусто — разрешить все названия.'),
+            self.field('Исключить по названию', exclude, 'Например LTE — все профили с LTE в названии исключаются из доступного пула и автовыбора, остальные остаются. Регистр не важен; ищется часть названия, без регулярных выражений. Исключение имеет приоритет над полем «Название содержит». Пусто — никого не исключать.'),
             self.field('Проверять каждые, секунд', interval), self.field('Порог улучшения задержки, мс', tolerance, 'Уменьшает переключения при небольших колебаниях. Недоступный узел не удерживается этим порогом.'),
             node('label', 'at-checkbox', [interrupt, label('Разрывать текущие соединения при переключении')]),
             node('p', 'at-footnote', label('Обычно выключено: новые соединения идут через выбранный узел, текущие сохраняются. Включение может прервать звонки и загрузки. После 30 минут простоя проверки приостанавливаются до нового трафика.')),
@@ -487,7 +492,7 @@ return view.extend({
 
     cloneSectionDialog: function(section) {
         var self=this,name=node('input','at-input at-clone-name',[],{value:(section.name+' копия').slice(0,48),maxlength:48});
-        ui.showModal('Копировать сохранённую секцию',[self.field('Новое название',name),node('p','at-footnote',label('Будет скопирована последняя сохранённая версия. Копия выключена, имеет новый ID и не открывает прокси-порт. Несохранённые изменения формы не входят в копию.')),self.button('Создать копию',function(){return result(api.sectionClone(section.id,name.value.trim())).then(function(){ui.hideModal();return self.reload();});},'primary',self.busy())]);
+        ui.showModal('Копировать сохранённую секцию',[atlasElement('button',{class:'btn',click:ui.hideModal},'Отмена'),self.field('Новое название',name),node('p','at-footnote',label('Будет скопирована последняя сохранённая версия. Копия выключена, имеет новый ID и не открывает прокси-порт. Несохранённые изменения формы не входят в копию.')),self.button('Создать копию',function(){return result(api.sectionClone(section.id,name.value.trim())).then(function(){ui.hideModal();return self.reload();});},'primary',self.busy())]);
     },
     plannerCard: function() {
         var self=this;
@@ -500,7 +505,7 @@ return view.extend({
         var network=node('select','at-input at-explain-network',[atlasElement('option',{value:'tcp'},'TCP'),atlasElement('option',{value:'udp'},'UDP')]);
         var protocol=node('select','at-input at-explain-protocol',['tls','http','dns','quic',''].map(function(x){return atlasElement('option',{value:x},x||'Неизвестен');}));
         var output=node('div','at-explain-result');
-        ui.showModal('Объяснение маршрута',[node('div','at-grid-2',Object.keys(fields).map(function(k){return self.field({domain:'Домен',ip:'IP назначения',source_ip:'IP устройства',port:'Порт',inbound:'Вход'}[k],fields[k]);}).concat([self.field('Транспорт',network),self.field('Распознанный протокол',protocol)])),node('p','at-footnote',label('Это разбор правил, а не сетевой тест. Для точного результата укажите известные IP и протокол. Без них и при бинарном SRS ответ может быть неопределённым.')),output,self.button('Показать маршрут',function(){var query={network:network.value,protocol:protocol.value};Object.keys(fields).forEach(function(k){if(fields[k].value.trim())query[k]=k==='port'?Number(fields[k].value):fields[k].value.trim();});return result(api.routeExplain(query)).then(function(r){output.replaceChildren(node('strong','',label(r.certain ? 'Маршрут: '+(r.action==='reject'?'Блокировать':r.outbound) : 'Неопределённо: не хватает данных для предыдущих правил')),node('pre','',label(JSON.stringify(r.trace,null,2))));});},'primary',self.busy())]);
+        ui.showModal('Объяснение маршрута',[atlasElement('button',{class:'btn',click:ui.hideModal},'Закрыть'),node('div','at-grid-2',Object.keys(fields).map(function(k){return self.field({domain:'Домен',ip:'IP назначения',source_ip:'IP устройства',port:'Порт',inbound:'Вход'}[k],fields[k]);}).concat([self.field('Транспорт',network),self.field('Распознанный протокол',protocol)])),node('p','at-footnote',label('Это разбор правил, а не сетевой тест. Для точного результата укажите известные IP и протокол. Без них и при бинарном SRS ответ может быть неопределённым.')),output,self.button('Показать маршрут',function(){var query={network:network.value,protocol:protocol.value};Object.keys(fields).forEach(function(k){if(fields[k].value.trim())query[k]=k==='port'?Number(fields[k].value):fields[k].value.trim();});return result(api.routeExplain(query)).then(function(r){output.replaceChildren(node('strong','',label(r.certain ? 'Маршрут: '+(r.action==='reject'?'Блокировать':r.outbound) : 'Неопределённо: не хватает данных для предыдущих правил')),node('pre','',label(JSON.stringify(r.trace,null,2))));});},'primary',self.busy())]);
     },
 
     siteCheckFields: function(section) {
