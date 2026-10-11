@@ -784,7 +784,7 @@ def defaults():
     return {'version': 1, 'subscriptions': [], 'settings': {'mode': 'rules', 'selected': 'auto',
         'domains': [], 'cidrs': [], 'bypass_domains': [], 'bypass_cidrs': [], 'interval_hours': 12,
         'countries': [], 'excluded_countries': [], 'preferred_countries': [], 'require_verified_countries': False, 'protocols': [], 'include_names': [], 'exclude_names': [],
-        'auto_interval_seconds': 60, 'auto_tolerance_ms': 80, 'interrupt_connections': False,
+        'group_order': False, 'auto_interval_seconds': 60, 'auto_tolerance_ms': 80, 'interrupt_connections': False,
         'auto_strategy': 'fastest', 'min_ping_ms': 0, 'max_ping_ms': 0,
         'urltest_url': 'https://www.gstatic.com/generate_204',
         'urltest_fallbacks': [], 'urltest_download_check': 'default', 'urltest_download_url': '',
@@ -871,6 +871,7 @@ def validate_settings(data):
         raise AtlasError('Для панели укажите IP адрес роутера') from exc
     if api_ip.version != 4 or api_ip.is_multicast or api_ip.is_link_local or (api_ip.is_unspecified and not result['yacd_wan']) or (not api_ip.is_private and not result['yacd_wan']):
         raise AtlasError('Внешний адрес панели требует включения WAN-доступа')
+    if type(result['group_order']) is not bool:raise AtlasError('Порядок групп должен быть логическим значением')
     if type(result['fakeip']) is not bool:
         raise AtlasError('Некорректный флаг FakeIP')
     if type(result['browser_diagnostics']) is not bool:
@@ -1029,6 +1030,7 @@ def validate_settings(data):
             raise AtlasError('Некорректный статус кеша SRS')
         if 'count' in source and (type(source['count']) is not int or not 0 <= source['count'] <= MAX_RULE_LIST_ENTRIES):
             raise AtlasError('Некорректное число правил списка')
+        normalized['count']=source.get('count',len(normalized['domains'])+len(normalized['cidrs']))
         lists.append(normalized)
     if total_entries > MAX_TOTAL_RULE_LIST_ENTRIES:
         raise AtlasError('Общий кеш списков ограничен 50000 правилами')
@@ -1095,10 +1097,27 @@ def validate_settings(data):
     sections, names = [], set()
     for section in result['sections']:
         required = {'name', 'policy', 'domains', 'cidrs', 'source_ips'}
-        allowed = required | {'pool', 'interface', 'resolver', 'source_interfaces', 'ports', 'networks', 'id', 'enabled', 'mixed_proxy', 'outbound_config', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips', 'resolve_real_ip', 'auto_interval_seconds', 'auto_tolerance_ms', 'urltest_url', 'udp_over_tcp', 'udp_over_tcp_version', 'urltest_fallbacks', 'urltest_download_check', 'urltest_download_url'}
+        allowed = required | {'pool', 'interface', 'resolver', 'source_interfaces', 'ports', 'networks', 'id', 'enabled', 'mixed_proxy', 'outbound_config', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips', 'resolve_real_ip', 'auto_interval_seconds', 'auto_tolerance_ms', 'urltest_url', 'udp_over_tcp', 'udp_over_tcp_version', 'urltest_fallbacks', 'urltest_download_check', 'urltest_download_url', 'site_checks'}
         if not isinstance(section, dict) or required - set(section) or set(section) - allowed:
             raise AtlasError('Некорректная секция маршрутизации')
         section = dict(section)
+        checks=section.setdefault('site_checks',[])
+        if not isinstance(checks,list) or len(checks)>3:
+            raise AtlasError('Проверки сайтов: не больше трёх адресов на группу')
+        normalized_checks=[]
+        for item in checks:
+            if not isinstance(item,dict) or set(item)-{'url','statuses','contains'} or 'url' not in item:
+                raise AtlasError('Проверка сайта: URL, коды ответа и необязательный текст')
+            url=subscription_url(item['url']);rule_list_url(url)
+            codes=item.get('statuses',[200]);marker=item.get('contains','')
+            if not isinstance(codes,list) or not 1<=len(codes)<=8 or any(type(x) is not int or not 200<=x<300 for x in codes):
+                raise AtlasError('Допустимые ответы сайта: от 200 до 299, максимум восемь кодов')
+            if not isinstance(marker,str) or len(marker.encode('utf-8'))>512 or '\x00' in marker:
+                raise AtlasError('Текст проверки сайта ограничен 512 байтами')
+            normalized_checks.append(dict(url=url,statuses=sorted(set(codes)),contains=marker))
+        section['site_checks']=normalized_checks
+        if checks and (section['policy']!='proxy' or section.get('outbound_config')):
+            raise AtlasError('Проверка сайтов требует обычный прокси-пул группы')
         try: section=engine_features.validate_options(section,subscription_url)
         except ValueError as exc:raise AtlasError(str(exc)) from exc
         if (section['urltest_fallbacks'] or section['urltest_download_check']!='default') and (section['policy']!='proxy' or section.get('outbound_config')):
@@ -1159,7 +1178,7 @@ def validate_settings(data):
         if pool and section['policy'] != 'proxy':
             raise AtlasError('Пул подписки можно задать только для политики proxy')
         normalized = {'name': name, 'policy': section['policy'], 'pool': pool, 'interface': interface, 'resolver': resolver}
-        normalized.update({key:section[key] for key in ('resolve_real_ip','auto_interval_seconds','auto_tolerance_ms','urltest_url','udp_over_tcp','udp_over_tcp_version','urltest_fallbacks','urltest_download_check','urltest_download_url')})
+        normalized.update({key:section[key] for key in ('resolve_real_ip','auto_interval_seconds','auto_tolerance_ms','urltest_url','udp_over_tcp','udp_over_tcp_version','urltest_fallbacks','urltest_download_check','urltest_download_url','site_checks')})
         if type(section['enabled']) is not bool or not isinstance(section['id'], str) or not re.fullmatch('[a-f0-9]{16}', section['id']):
             raise AtlasError('Некорректный ID или флаг секции')
         if any(x['id'] == section['id'] for x in sections):
@@ -1261,8 +1280,9 @@ def validate_settings(data):
     section_ids = {x['id']: x for x in sections}
     for item in result['remote_lists']:
         target = item['section']
-        if not isinstance(target,str) or (target and (target not in section_ids or item['policy'] != 'proxy' or section_ids[target]['policy'] not in ('proxy','interface','direct'))):
-            raise AtlasError('Список требует существующую секцию и политику proxy')
+        compatible=target in section_ids and ((item['policy']=='proxy' and section_ids[target]['policy'] in ('proxy','interface','direct')) or item['policy']==section_ids[target]['policy'] and item['policy'] in ('direct','block'))
+        if not isinstance(target,str) or (target and not compatible):
+            raise AtlasError('Список требует существующую группу с совместимым маршрутом')
         if target and item['enabled'] and not section_ids[target]['enabled']:
             raise AtlasError('Включённый список ссылается на выключенную секцию')
     target = result['fetch_lists_section']
@@ -1360,7 +1380,7 @@ def all_nodes(state):
     return nodes
 
 def custom_auto_policy(settings):
-    return settings['auto_strategy'] != 'fastest' or bool(settings['preferred_countries']) or bool(settings['min_ping_ms'] or settings['max_ping_ms'])
+    return settings['auto_strategy'] != 'fastest' or bool(settings['preferred_countries']) or bool(settings['min_ping_ms'] or settings['max_ping_ms']) or any(s.get('enabled',True) and s.get('site_checks') for s in settings['sections'])
 
 
 def real_ip_resolution_active(config):
@@ -1465,7 +1485,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             outs.extend(extra)
         else:
             target = (pool_tags[section['pool']] if section['pool'] else 'proxy') if section['policy'] == 'proxy' else interface_tags[section['interface']] if section['policy'] == 'interface' else 'direct'
-            if section['policy']=='proxy' and (section['urltest_fallbacks'] or section['urltest_download_check']!='default' or any(section[k] is not None if k!='urltest_url' else bool(section[k]) for k in ('auto_interval_seconds','auto_tolerance_ms','urltest_url')) or any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version'))):
+            if section['policy']=='proxy' and (section.get('site_checks') or section['urltest_fallbacks'] or section['urltest_download_check']!='default' or any(section[k] is not None if k!='urltest_url' else bool(section[k]) for k in ('auto_interval_seconds','auto_tolerance_ms','urltest_url')) or any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version'))):
                 members=[tag for tag in tags if not section['pool'] or tag.startswith(section['pool'])]
                 if any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version')):
                     private=[]
@@ -1547,7 +1567,9 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         rules.append({'inbound': ['list-fetch'], 'action': 'route', 'outbound': fetch_outbound})
     section_inbounds = []
     section_rule_resolution = {}
+    section_rule_owner={}
     def register_section_rule(rule, section):
+        section_rule_owner[id(rule)]=section['id']
         if section.get('resolve_real_ip') is not None:
             section_rule_resolution[id(rule)] = section['resolve_real_ip']
         return rule
@@ -1559,6 +1581,10 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                 section_inbounds.append({'type': 'mixed', 'tag': tag, 'listen': listener['listen'], 'listen_port': listener['port'],
                                          'users': [{'username': listener['username'], 'password': listener['password']}]})
                 rules.append(register_section_rule({'inbound': [tag], 'action': 'route', 'outbound': section_targets[section['id']]},section))
+    dns_rule_owner={}
+    def group_dns(rule,section):
+        dns_rule_owner[id(rule)]=section['id']
+        return rule
     dns_rules = []
     priority_dns_exclusions = []
     priority_exclusions = []
@@ -1580,7 +1606,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             dns_match={'domain_suffix':section['domains']}
             if section['source_ips']:
                 dns_match['source_ip_cidr']=section['source_ips']
-            dns_rules.append(dict(section_match(section,dns_match,dns=True),action='route',server=tag))
+            dns_rules.append(group_dns(dict(section_match(section,dns_match,dns=True),action='route',server=tag),section))
     rules.append({'ip_is_private': True, 'action': 'route', 'outbound': 'direct'})
     if settings['routing_excluded_ips']:
         rules.append({'source_ip_cidr': settings['routing_excluded_ips'], 'action': 'route', 'outbound': 'direct'})
@@ -1623,7 +1649,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                 continue
         match=section_match(section,match)
         if section['policy'] == 'block':
-            rules.append(dict(match, action='reject'))
+            rules.append(register_section_rule(dict(match, action='reject'),section))
         elif section['policy'] == 'exclude':
             priority_exclusions.append(dict(match, action='route', outbound='direct'))
         else:
@@ -1640,7 +1666,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             match = {'rule_set':['rules_' + rule_list['id']]} if rule_set_format(rule_list) else {'domain_suffix':rule_list['domains']} if rule_list['domains'] else {}
             if match:
                 if assigned:match=section_match(assigned,match,dns=True)
-                dns_rules.append(dict(match,action='route',server=section_resolvers[rule_list['section']]))
+                dns_rules.append(group_dns(dict(match,action='route',server=section_resolvers[rule_list['section']]),assigned))
                 route_match={'rule_set':['rules_' + rule_list['id']]} if rule_set_format(rule_list) else {'domain_suffix':rule_list['domains']}
                 if assigned:route_match=section_match(assigned,route_match)
                 section_route_dns[(section_targets[rule_list['section']],json.dumps(route_match,sort_keys=True))] = section_resolvers[rule_list['section']]
@@ -1689,6 +1715,10 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                 else:
                     if assigned:register_section_rule(rule,assigned)
                     rules.append(rule)
+    if settings['group_order']:
+        positions={section['id']:i for i,section in enumerate(settings['sections'])}
+        tail=rules[exclusion_insert_at:]
+        rules[exclusion_insert_at:]=sorted(tail,key=lambda rule:positions.get(section_rule_owner.get(id(rule)),len(positions)))
     rules[exclusion_insert_at:exclusion_insert_at] = priority_exclusions
     if settings['routed_source_ips']:
         rules.append({'source_ip_cidr': settings['routed_source_ips'], 'action': 'route', 'outbound': 'proxy'})
@@ -1757,8 +1787,8 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                     match['source_ip_cidr'] = section['source_ips']
                 match=section_match(section,match,dns=True)
                 target = priority_dns_exclusions if section['policy'] == 'exclude' else dns_rules
-                target.append(dict(match, action='reject') if section['policy'] == 'block' else
-                              domain_dns_rule(match, section['policy'] == 'proxy'))
+                target.append(group_dns(dict(match, action='reject') if section['policy'] == 'block' else
+                              domain_dns_rule(match, section['policy'] == 'proxy'),section))
         for item in ordered_lists:
             if not item['enabled']:
                 continue
@@ -1768,14 +1798,19 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             assigned=next((x for x in settings['sections'] if x['id']==item['section']),None)
             if assigned:match=section_match(assigned,match,dns=True)
             target = priority_dns_exclusions if item['policy'] == 'exclude' else dns_rules
-            target.append(dict(match, action='reject') if item['policy'] in ('block', 'dnsblock') else
-                          domain_dns_rule(match, item['policy'] == 'proxy'))
+            dns_rule=dict(match, action='reject') if item['policy'] in ('block', 'dnsblock') else domain_dns_rule(match,item['policy']=='proxy')
+            target.append(group_dns(dns_rule,assigned) if assigned else dns_rule)
         if settings['mode'] == 'global':
             dns_rules.append(domain_dns_rule({}, True))
         elif settings['domains']:
             dns_rules.append(domain_dns_rule({'domain_suffix': settings['domains']}, True))
+    if settings['group_order']:
+        positions={section['id']:i for i,section in enumerate(settings['sections'])}
+        dns_rules.sort(key=lambda rule:positions.get(dns_rule_owner.get(id(rule)),len(positions)))
     # A deny rule must win over a custom DNS resolver or FakeIP rewrite.
-    dns_rules = [rule for rule in dns_rules if rule.get('action') == 'reject'] + priority_dns_exclusions + [rule for rule in dns_rules if rule.get('action') != 'reject']
+    def priority_dns_reject(rule):
+        return rule.get('action')=='reject' and (not settings['group_order'] or id(rule) not in dns_rule_owner)
+    dns_rules = [rule for rule in dns_rules if priority_dns_reject(rule)] + priority_dns_exclusions + [rule for rule in dns_rules if not priority_dns_reject(rule)]
     if settings['fakeip']:
         # List downloads validate real public addresses before opening a connection.
         # Keep their hosts out of FakeIP; the list-fetch inbound still selects its proxy.
@@ -1784,6 +1819,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         # GitHub release URLs redirect binary rule sets to this public CDN.
         if any(host in ('github.com', 'api.github.com') for host in list_hosts):
             list_hosts = sorted(set(list_hosts) | {'release-assets.githubusercontent.com'})
+        list_hosts=sorted(set(list_hosts) | {urlsplit(c['url']).hostname for section in settings['sections'] if section['enabled'] for c in section.get('site_checks',[])})
         if list_hosts:
             first_route = next((i for i, rule in enumerate(dns_rules) if rule.get('action') != 'reject'), len(dns_rules))
             dns_rules.insert(first_route, {'domain': list_hosts, 'action': 'route', 'server': 'secure'})

@@ -33,6 +33,8 @@ from version import VERSION
 from backups import MAX_BACKUP_BYTES, make_backup, restore_state
 from urllib.parse import urlsplit, quote, urlencode
 from download_policy import DownloadPolicy
+from site_policy import SitePolicy
+from security import compare_client, fingerprint
 from core import AtlasError, MAX_BYTES, MAX_RULE_LIST_ENTRIES, MAX_SUBSCRIPTIONS, MAX_TOTAL_NODES, all_nodes, custom_auto_policy, real_ip_resolution_active, country_for_node, country_source_for_node, defaults, filter_nodes, host, make_config, parse_subscription, privacy_checks, rule_set_format, rule_list_url, selection_nodes, subscription_headers, subscription_url, text, validate_settings
 
 DATA = Path('/etc/atlas')
@@ -47,7 +49,7 @@ METHODS = {'status': {}, 'save_subscription': {'id': '', 'name': '', 'url': '', 
            'import_profiles': {'name': '', 'content': '', 'id': ''},
            'get_profiles': {'id': ''}, 'section_details': {'id': ''},
            'config_preview': {'validate':False}, 'route_explain': {'query':{}}, 'section_clone': {'id':'','name':''}, 'set_autostart': {'enabled':False},
-           'service_logs': {}, 'nft_diagnostics': {},
+           'service_logs': {}, 'nft_diagnostics': {}, 'security_compare': {'observations':{}},
            'export_backup': {}, 'restore_backup': {'content': ''}, 'diagnostic_report': {},
            'delete_subscription': {'id': ''}, 'save_settings': {'settings': {}},
            'import_rules': {'content': '', 'target': ''},
@@ -436,13 +438,31 @@ def automatic_select(current):
                 if section['udp_over_tcp'] is not None or section['udp_over_tcp_version'] is not None:
                     members=[dict(n,key='section_'+section['id']+'_'+n['key']) for n in members]
                 policy=dict(settings)
-                for field in ('urltest_fallbacks','urltest_download_check','urltest_download_url'):
+                for field in ('urltest_fallbacks','urltest_download_check','urltest_download_url','site_checks'):
                     policy[field]=section.get(field, [] if field=='urltest_fallbacks' else 'default' if field=='urltest_download_check' else '')
                 if section['udp_over_tcp'] is not None or section['udp_over_tcp_version'] is not None:
                     policy['urltest_fallbacks']=['section_'+section['id']+'_'+key for key in policy['urltest_fallbacks']]
                 if section['auto_interval_seconds'] is not None:
                     policy['auto_interval_seconds']=section['auto_interval_seconds']
                 groups[tag]=(members, 'section_'+section['id']+'_auto', policy)
+        sites=None
+        if any(policy.get('site_checks') for _,_,policy in groups.values()):
+            site_path=RUN/'site-proofs.json'
+            try:saved_sites=read_json(site_path,{}) if site_path.stat().st_size<=1048576 else {}
+            except (OSError,ValueError):saved_sites={}
+            generation=hashlib.sha256(CONFIG.read_bytes()).hexdigest()
+            def site_transfer(key,payload,deadline):
+                if payload['download']:
+                    result=clash_request('GET','/proxies/'+quote(key,safe='')+'/download?'+urlencode({'url':payload['download'],'timeout':5000}),timeout=5.5)
+                    if result.get('ok') is not True or result.get('received')!=65536:return {'ok':False,'tested':0}
+                node=next((n for members,_,_ in groups.values() for n in members if n['key']==key),None)
+                if node is None:return {'ok':False,'tested':0}
+                tested=0
+                for website in payload['sites']:
+                    if time.monotonic()>=deadline or not site_probe(node,settings,website,deadline).get('ok'):return {'ok':False,'tested':tested}
+                    tested+=1
+                return {'ok':True,'tested':tested}
+            sites=SitePolicy(saved_sites,generation,site_transfer)
         transfers=None
         ordered=list(groups.items())
         if custom and any(policy.get('urltest_download_check')=='custom' for _,(_,_,policy) in ordered):
@@ -454,13 +474,19 @@ def automatic_select(current):
                 path='/proxies/'+quote(key,safe='')+'/download?'+urlencode({'url':url,'timeout':5000})
                 return clash_request('GET',path,timeout=5.5)
             transfers=DownloadPolicy(saved,generation,transfer)
-            offset=transfers.cursor%max(1,len(ordered))
+        rotation=sites or transfers
+        if rotation is not None:
+            offset=rotation.cursor%max(1,len(ordered))
             ordered=ordered[offset:]+ordered[:offset]
+        if sites is not None and transfers is not None:
+            transfers.deadline=sites.deadline
         results = []
         for tag, (members, native, policy) in ordered:
             previous = proxies.get(tag, {}).get('now')
             download=None
-            if transfers is not None and policy.get('urltest_download_check')=='custom':
+            if sites is not None and policy.get('site_checks'):
+                key,download=sites.choose(members,policy,proxies,previous,auto_choice)
+            elif transfers is not None and policy.get('urltest_download_check')=='custom':
                 key,download=transfers.choose(members,policy,proxies,previous,auto_choice)
             else:key = (auto_choice(members, policy, proxies) or 'policy-block') if custom else native
             try:
@@ -470,8 +496,9 @@ def automatic_select(current):
                 results.append({'group':tag,'selected':previous,'requested':key,'blocked':previous=='policy-block','changed':False,'ok':False,'reason':'switch-failed'})
                 continue
             results.append({'group': tag, 'selected': key, 'blocked': key == 'policy-block', 'changed': previous != key, 'ok':True})
-            if download:results[-1]['download']=download
+            if download:results[-1]['site_check' if policy.get('site_checks') else 'download']=download
         if transfers is not None:atomic(RUN/'download-proofs.json',transfers.export(len(ordered)))
+        if sites is not None:atomic(RUN/'site-proofs.json',sites.export(len(ordered)))
         result = {'changed': any(x['changed'] for x in results), 'groups': results,
                   'selected': next((x['selected'] for x in results if x['group'] == 'proxy'), None),
                   'at': int(time.time()), 'reason': 'partial-failure' if any(not x['ok'] for x in results) else 'criteria-applied' if custom else 'native-fastest'}
@@ -1369,7 +1396,26 @@ def refresh(current, sub_id=''):
     return 'Обновлено подписок: %d, списков правил: %d' % (successes, list_successes)
 
 
-def probe(node, binary=BINARY, directory=RUN, settings=None):
+def site_probe(node,settings,website,deadline):
+    """An absolute Linux deadline also interrupts slow HTTP headers/body trickles."""
+    import signal,threading
+    if not hasattr(signal,'setitimer') or threading.current_thread() is not threading.main_thread():
+        return {'ok':False,'error':'Проверка сайта требует основной процесс Linux'}
+    remaining=deadline-time.monotonic()
+    if remaining<=0:return {'ok':False}
+    previous=signal.getsignal(signal.SIGALRM);timer=signal.getitimer(signal.ITIMER_REAL);start=time.monotonic()
+    def expired(*args):raise AtlasError('Абсолютное время проверки сайта истекло')
+    signal.signal(signal.SIGALRM,expired);signal.setitimer(signal.ITIMER_REAL,remaining)
+    try:
+        require_public_https(website['url'])
+        return probe(node,settings=settings,website=website,deadline=deadline)
+    except (AtlasError,OSError):return {'ok':False}
+    finally:
+        signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,previous)
+        if timer[0]>0:signal.setitimer(signal.ITIMER_REAL,max(.000001,timer[0]-(time.monotonic()-start)),timer[1])
+
+
+def probe(node, binary=BINARY, directory=RUN, settings=None, website=None, deadline=None):
     """Real HTTPS request through a dedicated loopback mixed inbound, no TUN."""
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
@@ -1382,7 +1428,7 @@ def probe(node, binary=BINARY, directory=RUN, settings=None):
                            fetch_lists_subscription='', mixed_proxy_enabled=False)
     config = make_config({'settings': active_settings, 'subscriptions': []}, tun=False,
                          mixed_port=listen_port, probe_node=node)
-    test_url = urlsplit(active_settings['urltest_url'])
+    test_url = urlsplit(website['url'] if website else active_settings['urltest_url'])
     test_host = test_url.hostname
     test_port = test_url.port or 443
     test_path = test_url.path or '/'
@@ -1401,6 +1447,7 @@ def probe(node, binary=BINARY, directory=RUN, settings=None):
         stage = 'engine'
         try:
             for _ in range(30):
+                if deadline is not None and time.monotonic()>=deadline:raise AtlasError('Время проверки сайта истекло')
                 if process.poll() is not None:
                     logfile.seek(0)
                     diagnostic = logfile.read(16384).lower()
@@ -1418,13 +1465,18 @@ def probe(node, binary=BINARY, directory=RUN, settings=None):
             import ssl
             start = time.monotonic()
             stage = 'https'
-            connection = http.client.HTTPSConnection('127.0.0.1', listen_port, timeout=12, context=ssl.create_default_context())
+            timeout=min(5,max(.2,deadline-time.monotonic())) if deadline is not None else 12
+            connection = http.client.HTTPSConnection('127.0.0.1', listen_port, timeout=timeout, context=ssl.create_default_context())
             connection.set_tunnel(test_host, test_port)
             try:
-                connection.request('GET', test_path, headers={'Host': test_host, 'Connection': 'close'})
+                connection.request('GET', test_path, headers={'Host': test_host, 'Connection': 'close', 'Accept-Encoding': 'identity', 'User-Agent': 'Atlas-site-check/1'})
                 response = connection.getresponse()
-                if not 200 <= response.status < 300:
+                if (response.status not in website['statuses']) if website else (not 200 <= response.status < 300):
                     raise AtlasError('Проверочный URL вернул HTTP %d' % response.status)
+                if website and website.get('contains'):
+                    body=response.read(65537)
+                    if website['contains'].encode('utf-8') not in body[:65536]:raise AtlasError('В ответе сайта не найден ожидаемый текст в первых 64 КиБ')
+                if deadline is not None and time.monotonic()>=deadline:raise AtlasError('Время проверки сайта истекло')
                 return {'ok': True, 'stage': 'https', 'latency_ms': round((time.monotonic() - start) * 1000), 'checked': int(time.time()), 'http': response.status}
             finally:
                 connection.close()
@@ -1433,6 +1485,11 @@ def probe(node, binary=BINARY, directory=RUN, settings=None):
         except (OSError, http.client.HTTPException):
             return {'ok': False, 'stage': stage, 'checked': int(time.time()), 'error': 'HTTPS через узел не прошёл (сеть, TLS или параметры узла)'}
         finally:
+            if website:
+                # The network deadline must not interrupt child termination.
+                import signal
+                if hasattr(signal,'setitimer'):
+                    signal.setitimer(signal.ITIMER_REAL,0)
             process.terminate()
             try:
                 process.wait(timeout=4)
@@ -1658,7 +1715,7 @@ def privacy_egress_test(node, direct_check=direct_public_ip, proxy_check=proxied
         direct = direct_check()
         proxied = proxy_check(node)
         return {'status': 'done', 'ok': direct != proxied, 'same_exit': direct == proxied,
-                'checked': checked, 'error': ''}
+                'checked': checked, 'error': '', 'direct_ipv4_sha256':fingerprint(direct), 'proxy_ipv4_sha256':fingerprint(proxied)}
     except (AtlasError, OSError, ValueError, UnicodeError, urllib.error.URLError,
             http.client.HTTPException, subprocess.TimeoutExpired):
         return {'status': 'error', 'ok': False, 'same_exit': None, 'checked': checked,
@@ -1835,6 +1892,17 @@ def dispatch(method, args):
             action='enable' if args['enabled'] else 'disable'
             if run(['/etc/init.d/atlas',action],10).returncode:raise AtlasError('Не удалось изменить автозапуск')
             return {'ok':True,'enabled':args['enabled']}
+        elif method == 'security_compare':
+            try:
+                baseline=read_json(RUN/'privacy-egress.json',{})
+                generation=hashlib.sha256(CONFIG.read_bytes()).hexdigest() if CONFIG.exists() else ''
+                from security import uniform_proxy_expected
+                uniform=uniform_proxy_expected(current['settings'],read_json(CONFIG,{}))
+                result=compare_client(args.get('observations'),baseline,'global' if uniform else 'rules',generation)
+                if current['settings']['mode']=='global' and not uniform:
+                    result['notice']='В глобальной конфигурации есть прямые маршруты или исключения. Прямой выход отмечен без автоматического обвинения в утечке: проверьте маршрут тестового сайта и устройства.'
+                return result
+            except ValueError as exc:raise AtlasError(str(exc)) from exc
         elif method == 'nft_diagnostics':
             return inspect_firewall(run,read_json(CONFIG,{}))
         elif method == 'config_preview':
@@ -2124,7 +2192,7 @@ def dispatch(method, args):
                 if old_section:
                     section.setdefault('id', old_section['id'])
                     section.setdefault('outbound_config', old_section['outbound_config'])
-                    for field in ('resolve_real_ip','auto_interval_seconds','auto_tolerance_ms','urltest_url','udp_over_tcp','udp_over_tcp_version','urltest_fallbacks','urltest_download_check','urltest_download_url'):
+                    for field in ('resolve_real_ip','auto_interval_seconds','auto_tolerance_ms','urltest_url','udp_over_tcp','udp_over_tcp_version','urltest_fallbacks','urltest_download_check','urltest_download_url','site_checks'):
                         section.setdefault(field,old_section[field])
                     section.setdefault('mixed_proxy', old_section['mixed_proxy'])
                     listener = section.get('mixed_proxy', {})
@@ -2143,7 +2211,8 @@ def dispatch(method, args):
                     if prior and item.get('url') == prior.get('url'):
                         for cache_key in ('domains','cidrs','updated','error','count','srs_cached','source_cached','source_rules'):
                             if cache_key=='source_rules' and cache_key not in prior:continue
-                            item.setdefault(cache_key, prior.get(cache_key, [] if cache_key in ('domains','cidrs') else 0 if cache_key == 'updated' else ''))
+                            # Cache metadata is owned by the server, not by the form.
+                            item[cache_key]=prior.get(cache_key, [] if cache_key in ('domains','cidrs') else 0 if cache_key in ('updated','count') else False if cache_key in ('srs_cached','source_cached') else '')
             current['settings'] = validate_settings(submitted)
             if all_nodes(current):
                 selection_nodes(current)
@@ -2258,6 +2327,7 @@ def worker(job_id):
                     active = next((n for n in nodes if n['key'] == current['settings']['selected']), None)
                 selected = active or nodes[0]
                 result = privacy_egress_test(selected)
+                result['generation']=hashlib.sha256(CONFIG.read_bytes()).hexdigest() if CONFIG.exists() else ''
                 atomic(RUN / 'privacy-egress.json', result)
                 if result['status'] != 'done':
                     raise AtlasError(result['error'])

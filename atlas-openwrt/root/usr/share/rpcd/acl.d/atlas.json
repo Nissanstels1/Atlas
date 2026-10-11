@@ -26,11 +26,16 @@
           "diagnostic_report",
           "section_dashboard",
           "section_select",
-          "dashboard_access"
-          ,"config_preview", "route_explain", "section_clone", "set_autostart", "service_logs", "nft_diagnostics"
+          "dashboard_access",
+          "config_preview",
+          "route_explain",
+          "section_clone",
+          "set_autostart",
+          "service_logs",
+          "nft_diagnostics",
+          "security_compare"
         ]
       }
     }
   }
 }
-

@@ -31,13 +31,22 @@ class DownloadPolicy:
         stamp=self.proofs.get(identity)
         return type(stamp) is int and 0<=self.current_time()-stamp<PROOF_TTL
 
+    def payload(self, settings):
+        return settings['urltest_download_url']
+
+    def signature(self, payload):
+        return payload
+
+    def accepted(self, result, payload):
+        return isinstance(result,dict) and result.get('ok') is True and type(result.get('received')) is int and result['received']==65536
+
     def choose(self, members, settings, proxies, previous, rank):
         remaining=members
         while remaining:
             key=rank(remaining,settings,proxies)
             if not key or not any(node['key']==key for node in remaining):return 'policy-block','no-candidate'
-            url=settings['urltest_download_url']
-            identity=hashlib.sha256((self.generation+'\0'+key+'\0'+url).encode()).hexdigest()
+            url=self.payload(settings)
+            identity=hashlib.sha256((self.generation+'\0'+key+'\0'+self.signature(url)).encode()).hexdigest()
             if identity in self.round:
                 passed=self.round[identity]
             elif previous==key and self.fresh(identity):
@@ -51,7 +60,7 @@ class DownloadPolicy:
                 self.calls+=1
                 try:result=self.check(key,url)
                 except Exception:result={}
-                passed=time.monotonic()<self.deadline and isinstance(result,dict) and result.get('ok') is True and type(result.get('received')) is int and result['received']==65536
+                passed=time.monotonic()<self.deadline and self.accepted(result,url)
                 self.round[identity]=passed
                 if passed:self.proofs[identity]=self.current_time()
                 else:self.proofs.pop(identity,None)

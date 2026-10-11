@@ -27,6 +27,7 @@ var api = {
     sectionClone: rpc.declare({object:'atlas',method:'section_clone',params:['id','name'],expect:{}}),
     setAutostart: rpc.declare({object:'atlas',method:'set_autostart',params:['enabled'],expect:{}}),
     serviceLogs: rpc.declare({object:'atlas',method:'service_logs',expect:{}}),
+    securityCompare: rpc.declare({object:'atlas',method:'security_compare',params:['observations'],expect:{}}),
     nftDiagnostics: rpc.declare({object:'atlas',method:'nft_diagnostics',expect:{}})
 };
 
@@ -40,7 +41,14 @@ function atlasElement(tag, attrs, children) {
     return E(tag, attributes, children == null ? [] : children);
 }
 function node(tag, cls, children, attrs) {
-    return atlasElement(tag, Object.assign({ 'class': cls || '' }, attrs || {}), children);
+    var element=atlasElement(tag, Object.assign({ 'class': cls || '' }, attrs || {}), children);
+    if(tag==='label' && cls==='at-checkbox') {
+        var title=element.textContent,help=atlasHelpBox(title);
+        element.appendChild(help);
+        var control=Array.from(element.children || []).find(function(x){return (x.tagName || x.tag || '').toLowerCase()==='input';});
+        if(control)control.addEventListener('change',function(){help.open=true;});
+    }
+    return element;
 }
 function label(t) { return document.createTextNode(String(t)); }
 function pill(t, cls) { return node('span', 'at-pill ' + (cls || ''), label(t)); }
@@ -54,6 +62,42 @@ function result(promise) {
 }
 function error(e) { ui.addNotification(null, node('p', '', label(e.message || String(e))), 'error'); }
 function lines(value) { return value.split(/[\n,]+/).map(function(s) { return s.trim(); }).filter(Boolean); }
+
+function atlasHelp(title,hint) {
+    var entries=[
+        [/Fail.closed|аварийн|защит.*обрыв|Kill.switch/i,'Защита при отказе запрещает защищаемый трафик, если туннель недоступен. Это может отключить доступ к интернету для выбранных устройств; сначала проверьте рабочий маршрут.','Включайте после проверки профилей и храните способ доступа к роутеру по локальной сети.'],
+        [/поряд.*групп|групп.*поряд/i,'Сайты и назначенные списки проверяются вместе, сверху вниз по группам. Первое совпадение определяет маршрут. Глобальные исключения и глобальные блокировки сохраняют приоритет.','Разместите группу с узким правилом выше общей группы с большим списком.'],
+        [/STUN/i,'STUN помогает браузеру узнать публичный адрес WebRTC. Запрос отправляется внешнему серверу только после вашего выбора; камера и микрофон не требуются.','Сравните адрес с измеренным выходом провайдера; недоступный STUN означает непроверенный результат.'],
+        [/Включ|Актив|Использовать/i,'Этот переключатель включает указанную возможность. Сохранение настроек и их применение — разные действия; перед применением проверьте итог.','Выключенная группа не участвует в маршрутизации. Включите её после выбора сайтов и подключения.'],
+        [/Пул|Подключение|подписк/i,'Подключение содержит профили доступа к прокси. Группа может использовать свой набор профилей независимо от других групп.','Группа YouTube → подписка «Видео»; группа Работа → другая подписка.'],
+        [/Адрес сайта|URL проверки|HTTPS URL|сайт для проверки/i,'Это адрес, который Atlas запрашивает через каждый кандидат. Указывайте конечную HTTPS страницу: перенаправление или HTTP ошибка не считаются успешной проверкой сайта.','https://www.youtube.com/ и ожидаемый ответ 200. Успех страницы не гарантирует работу видеопотока.'],
+        [/HTTP ответы/i,'Профиль допускается только после одного из указанных успешных кодов HTTP. Коды отказа не разрешены.','200 — обычная страница; 204 — пустой диагностический ответ.'],
+        [/Текст.*страниц/i,'Atlas ищет этот текст в первых 64 КиБ ответа. Это помогает исключить заглушки, но сайт может менять содержимое или возвращать CAPTCHA.','Для собственной тестовой страницы используйте постоянную строку atlas-ok.'],
+        [/Исключ.*домен|Домены-исключения/i,'Глобальное исключение направляет эти домены напрямую раньше групп. Исключение внутри группы передаёт запрос следующим группам.','Внутренняя корпоративная сеть может идти напрямую, остальные сайты — через прокси.'],
+        [/Домен|Сайты/i,'Укажите имя сайта без https://, порта и пути. Правило домена включает его поддомены. Несколько доменов одной группы используют одинаковый маршрут.','youtube.com включает www.youtube.com; домены видео могут потребовать отдельного списка.'],
+        [/IP устройств|Источник|Входящ/i,'Это ограничение по устройству, от которого пришёл трафик. Вместе с доменами действует условие «И», а не «ИЛИ».','example.org И устройство 192.168.1.25. Для отдельного полного маршрута устройства создайте другую группу.'],
+        [/CIDR|IP сет|IP назначения/i,'Правило сопоставляет адрес назначения или подсеть. CIDR задаёт диапазон адресов; при FakeIP известный движку адрес может отличаться от публичного.','192.168.1.25/32 — один IPv4 адрес; 192.168.1.0/24 — подсеть.'],
+        [/DNS|dnsmasq|resolver/i,'DNS переводит доменные имена в IP. Интеграция с dnsmasq направляет DNS устройств, использующих роутер, в Atlas. Собственный DoH браузера может обходить этот путь.','Настройте DNS устройства на адрес роутера; затем отдельно проверьте браузер.'],
+        [/FakeIP/i,'Для проксируемого домена выдаётся временный адрес из специального диапазона. Atlas сопоставляет его с доменом и выбирает нужный маршрут. Это не внешний IP и не доказательство анонимности.','Домен youtube.com → FakeIP → профиль группы YouTube.'],
+        [/Интервал|обновлен/i,'Интервал определяет желаемую частоту проверки или обновления. Фоновый выбор Atlas запускается планировщиком примерно раз в минуту и ограничивает число одновременных проверок.','60 секунд — обычный старт для автопроверки; подписку можно обновлять раз в несколько часов.'],
+        [/задержк|пинг|Допустимая разница/i,'Задержка показывает время ответа тестового адреса. Небольшая разница не обязательно требует переключения; стабильность зависит также от потерь и доступности нужного сайта.','Допуск 80 мс уменьшает лишние переключения между близкими профилями.'],
+        [/Стран|countries/i,'Название профиля может неверно указывать страну. Проверка страны измеряет выход конкретного профиля; строгий фильтр требует свежего подтверждения.','Разрешить DE и NL; непроверенные профили могут быть исключены строгим режимом.'],
+        [/Кеш|хранени|Путь|Каталог/i,'Данные можно хранить в памяти или на постоянном накопителе. Память освобождается при перезагрузке; постоянная запись изнашивает flash.','Для NanoPi кеш в RAM сохраняет flash; резервные копии храните отдельно.'],
+        [/Порт|TCP|UDP|Транспорт|QUIC/i,'Это дополнительное сетевое условие. QUIC использует UDP; блокировка UDP/443 заставляет совместимые приложения пробовать TCP, но не все приложения смогут переключиться.','HTTPS обычно использует TCP/443; QUIC — UDP/443.'],
+        [/Файл|список|списки|community/i,'Список объединяет много доменов или сетей. Назначьте его нужной группе и проверьте последнее обновление. При ошибке Atlas сохраняет прежнюю рабочую копию.','Общественный список YouTube → группа YouTube → её собственный профиль.'],
+        [/Выбор|профиль|резерв/i,'Автоматический режим выбирает подходящий профиль из набора. Ручной выбор фиксирует один профиль. Если проверки группы заданы, автоматический выбор требует их успеха.','Один профиль открывает YouTube, другой — HDRezka: создайте две группы с разными адресами проверки.'],
+        [/Остальные|Режим|маршрут|Действие/i,'Маршрут определяет, где пойдёт совпавший трафик. В режиме групп остальные сайты идут напрямую. В глобальном режиме используется общий прокси, кроме исключений.','Только Видео через прокси, банковский сайт и остальной интернет напрямую.'],
+        [/Пароль|заголовк|Имя пользователя/i,'Это данные доступа. Они сохраняются на роутере и могут входить в резервную копию. Не публикуйте их и не используйте обычный текст вместо защищённого поля пароля.','HTTP-заголовок Authorization нужен только если его требует провайдер подписки.'],
+        [/Название/i,'Название помогает различать группы и подключения. Оно не задаёт маршрут: маршрут определяется доменами, списками и выбранным действием.','Видео, Работа, Игры.'],
+        [/JSON/i,'Экспертная конфигурация для особых схем. Обычной настройке групп она не нужна. Ссылки на выходы и параметры проверяются перед применением.','Используйте мастер для стандартного маршрута; JSON нужен для нестандартной цепочки выходов.']
+    ];
+    var entry=entries.find(function(e){return e[0].test(title);});
+    return {body:(hint ? hint+' ' : '')+(entry ? entry[1] : 'Этот параметр изменяет указанное поведение Atlas. Если базовая настройка работает, сначала сохраните резервную копию и меняйте по одному параметру, проверяя результат.'),example:entry ? entry[2] : 'Настройте отдельную группу для нужных сайтов, сохраните и проверьте маршрут перед применением.'};
+}
+function atlasHelpBox(title,hint) {
+    var help=atlasHelp(title,hint);
+    return atlasElement('details',{'class':'at-help'},[atlasElement('summary',{'aria-label':'Пояснение: '+title},'Что это и как выбрать?'),node('p','',label(help.body)),node('p','at-help-example',label('Пример: '+help.example))]);
+}
 
 return view.extend({
     tab: 'overview',
@@ -128,7 +172,7 @@ return view.extend({
     },
     draw: function() {
         var self = this, d = self.data;
-        var navigation = [ ['overview', '◈', 'Обзор'], ['subscriptions', '▤', 'Подписки'], ['nodes', '◎', 'Серверы'], ['routing', '⇄', 'Маршрутизация'], ['privacy', '◉', 'Приватность'] ];
+        var navigation = [ ['overview', '◈', 'Обзор'], ['subscriptions', '▤', 'Подключения'], ['nodes', '◎', 'Профили'], ['routing', '⇄', 'Маршрутизация'], ['privacy', '◉', 'Безопасность'] ];
         if (!self.readonly) navigation.push(['monitor', '⌁', 'Монитор соединений']);
         navigation.push(['settings', '⚙', 'Настройки']);
         var sidebar = node('aside', 'at-sidebar', [
@@ -144,7 +188,7 @@ return view.extend({
         ]);
         var title = navigation.filter(function(n) { return n[0] === self.tab; })[0][2];
         var content = node('main', 'at-main', [
-            node('header', 'at-topbar', [node('div', '', [node('span', 'at-crumb', label('Сеть / Atlas')), node('h1', '', label(title))]), pill('sing-box', 'neutral')]),
+            node('header', 'at-topbar', [node('div', '', [node('span', 'at-crumb', label('Сеть / Atlas')), node('h1', '', label(title))]), self.button('Настроить по вопросам',function(){self.setupWizard();},'ghost',self.busy())]),
             self.readonly ? node('div', 'at-notice', label('Режим чтения: изменения доступны администратору.')) : label(''),
             self.offline ? node('div', 'at-notice error', label('Нет связи с роутером. Показаны последние полученные данные.')) : label(''),
             !d.engine ? node('div', 'at-notice error', label('sing-box не найден. Установите движок версии 1.12 или новее.')) : label(''),
@@ -182,8 +226,8 @@ return view.extend({
         var selected = d.runtime && d.runtime.blocked ? (d.runtime.reason === 'no-main-pool' ? d.runtime.message : 'Заблокирован критериями выбора') : d.runtime && d.runtime.available && d.runtime.selected ? d.runtime.name : 'Выбор движка пока неизвестен';
         return node('div', 'at-content', [
             node('section', 'at-hero', [
-                node('div', 'at-hero-copy', [pill('ВАША СЕТЬ, ВАШИ ПРАВИЛА', 'eyebrow'), node('h2', '', label('Всё идёт своим путём.')),
-                    node('p', '', label('Управляйте подписками и выбирайте, какой трафик отправлять через туннель.')),
+                node('div', 'at-hero-copy', [node('h2', '', label(d.running ? 'Atlas работает' : 'Atlas остановлен')),
+                    node('p', '', label('Подключения → группы сайтов → проверка и применение. Мастер проведёт настройку по шагам.')),
                     node('div', 'at-actions', [self.button(d.running ? 'Применить изменения' : 'Запустить Atlas', function() { return self.action(d.running ? 'apply' : 'start'); }, 'primary', self.busy() || (!d.nodes.length && !(d.settings.remote_lists || []).some(function(x){return x.enabled !== false;}) && !(d.settings.sections || []).some(function(x) { return x.enabled !== false && (x.outbound_config_set || x.policy !== 'proxy'); }))),
                         d.running ? self.button('Остановить', function() { return self.action('stop'); }, 'ghost', self.busy()) : self.button('Добавить подписку', function() { self.subscriptionDialog(); }, 'ghost', self.busy())])]),
                 node('div', 'at-orbit', [node('div', 'at-orbit-ring r1'), node('div', 'at-orbit-ring r2'), node('div', 'at-orbit-dot d1'), node('div', 'at-orbit-dot d2'), node('div', 'at-orbit-center', label('a'))], { 'aria-hidden': 'true' })
@@ -376,7 +420,7 @@ return view.extend({
         var element=atlasElement('details',{},[atlasElement('summary',{},'Резервные серверы и проверка скачивания'),node('p','at-footnote',label('Резерв используется по порядку, когда нет основного сервера, подходящего по свежим замерам и вашим критериям. После восстановления группа возвращается к основным. Резервные серверы совместимы с приоритетом стран и порогами пинга. Проверка скачивания совместно с критериями Atlas требует Atlas Engine r3; перед переключением проверяется передача 64 КиБ через выбранный сервер. Для расширений нужен Atlas Engine.')),list,self.button('Добавить резервный сервер',function(){var available=(self.data.nodes || []).find(function(n){return reserves.indexOf(n.key)<0;});if(available){reserves.push(available.key);redraw();}},'ghost',features.indexOf('urltest.fallbacks')<0),self.field('Проверка скачивания 64 КиБ перед переключением',mode),self.field('Адрес файла для проверки',url),node('p','at-footnote',label('Расширения установленного движка: '+(features.join(', ') || 'не обнаружены')+'. Штатный sing-box сохраняет прежнее поведение. Сохранённые неподдерживаемые настройки требуют совместимого движка или очистки.'))]);
         return {element:element,values:function(){return {urltest_fallbacks:reserves.slice(),urltest_download_check:mode.value,urltest_download_url:mode.value==='custom' ? url.value.trim() : ''};}};
     },
-    field: function(title, input, hint) { return node('label', 'at-field', [node('span', '', label(title)), input, hint ? node('small', '', label(hint)) : label('')]); },
+    field: function(title,input,hint) { var help=atlasHelpBox(title,hint);if(input.setAttribute)input.setAttribute('aria-label',title);if(input.addEventListener)input.addEventListener('change',function(){help.open=true;});return node('div','at-field',[node('span','',label(title)),input,hint ? node('small','',label(hint)) : label(''),help]); },
 
     cloneSectionDialog: function(section) {
         var self=this,name=node('input','at-input at-clone-name',[],{value:(section.name+' копия').slice(0,48),maxlength:48});
@@ -396,6 +440,104 @@ return view.extend({
         ui.showModal('Объяснение маршрута',[node('div','at-grid-2',Object.keys(fields).map(function(k){return self.field({domain:'Домен',ip:'IP назначения',source_ip:'IP устройства',port:'Порт',inbound:'Вход'}[k],fields[k]);}).concat([self.field('Транспорт',network),self.field('Распознанный протокол',protocol)])),node('p','at-footnote',label('Это разбор правил, а не сетевой тест. Для точного результата укажите известные IP и протокол. Без них и при бинарном SRS ответ может быть неопределённым.')),output,self.button('Показать маршрут',function(){var query={network:network.value,protocol:protocol.value};Object.keys(fields).forEach(function(k){if(fields[k].value.trim())query[k]=k==='port'?Number(fields[k].value):fields[k].value.trim();});return result(api.routeExplain(query)).then(function(r){output.replaceChildren(node('strong','',label(r.certain ? 'Маршрут: '+(r.action==='reject'?'Блокировать':r.outbound) : 'Неопределённо: не хватает данных для предыдущих правил')),node('pre','',label(JSON.stringify(r.trace,null,2))));});},'primary',self.busy())]);
     },
 
+    siteCheckFields: function(section) {
+        var self=this, rows=(section.site_checks || []).map(function(c){return Object.assign({},c);}), holder=node('div','at-site-checks');
+        function redraw(){holder.replaceChildren.apply(holder,rows.map(function(c,index){
+            var url=node('input','at-input at-site-url',[],{value:c.url || '',placeholder:'https://www.youtube.com/',type:'url'});
+            var statuses=node('input','at-input at-site-statuses',[],{value:(c.statuses || [200]).join(', '),placeholder:'200'});
+            var marker=node('input','at-input at-site-marker',[],{value:c.contains || '',placeholder:'Необязательно: название сайта на странице'});
+            url.addEventListener('input',function(){c.url=url.value;});statuses.addEventListener('input',function(){c.statuses=lines(statuses.value).map(Number);});marker.addEventListener('input',function(){c.contains=marker.value;});
+            return node('div','at-site-row',[self.field('Адрес сайта для проверки',url,'Откройте этот адрес в браузере и скопируйте окончательный HTTPS URL после перенаправления.'),node('div','at-grid-2',[self.field('Успешные HTTP ответы',statuses,'Обычно 200; для пустого тестового ответа — 204. Ответ 403 не считается успехом.'),self.field('Текст, который должен быть на странице',marker,'Дополнительная проверка в первых 64 КиБ. Помогает отличить сайт от заглушки. Проверка страницы не доказывает воспроизведение видео.')]),self.button('Убрать проверку',function(){rows.splice(index,1);redraw();},'danger-link')]);
+        }));}
+        redraw();
+        return {element:node('section','at-site-editor',[node('h3','',label('Какие сайты должны работать через этот профиль?')),node('p','at-footnote',label('Atlas проверяет каждый кандидат отдельно. Для группы YouTube укажите страницу YouTube; для другой группы — её сайт. Все заданные проверки должны пройти. Если подходящего профиля нет, эта группа блокируется, а не переходит напрямую. До трёх сайтов; периодический перебор выполняется ограниченными порциями.')),holder,self.button('+ Проверка сайта',function(){if(rows.length<3){rows.push({url:'',statuses:[200],contains:''});redraw();}},'ghost')]),values:function(){return rows.map(function(c){return {url:(c.url || '').trim(),statuses:c.statuses || [200],contains:c.contains || ''};});}};
+    },
+    sectionLayout: function(content) {
+        var basic=[],advanced=[];
+        Array.from(content.children).forEach(function(child){
+            var text=child.textContent || '', cls=child.getAttribute ? child.getAttribute('class') || '' : child.attributes && child.attributes.class || '';
+            if(cls.indexOf('at-grid-2')>=0){Array.from(child.children).forEach(function(field){if((field.textContent || '').indexOf('Домены')===0)basic.push(field);else advanced.push(field);});}
+            else if(text.indexOf('Название')===0 || text.indexOf('Группа включена')>=0 || text.indexOf('Секция включена')>=0 || text.indexOf('Действие')===0 || (text.indexOf('Пул подписки')===0 || text.indexOf('Подключение для группы')===0) || text.indexOf('Какие сайты должны')===0 || text.indexOf('Автопроверка серверов')===0 || text.indexOf('Автопроверка профилей')===0 || cls.indexOf('at-inline-error')>=0)basic.push(child);
+            else advanced.push(child);
+        });
+        content.replaceChildren.apply(content,[node('p','at-footnote',label('Группа связывает сайты с одним маршрутом. Сначала задайте название, сайты и подключение. Остальные условия нужны для особых случаев.'))].concat(basic,[atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Дополнительные условия и экспертные настройки'),node('p','at-footnote',label('Разные виды условий сочетаются через «И»: например, сайт И адрес устройства. Для условия «сайт ИЛИ другое устройство» создайте две группы.')),node('div','',advanced)])]));
+        return content;
+    },
+    routingLayout: function(content) {
+        var self=this,basic=[],advanced=[];
+        Array.from(content.children).forEach(function(child){
+            var text=child.textContent || '', cls=child.getAttribute ? child.getAttribute('class') || '' : child.attributes && child.attributes.class || '';
+            if(text.indexOf('Куда направлять трафик')===0 || text.indexOf('Режим маршрутизации')===0 || text.indexOf('Группы сайтов')===0 || cls==='at-actions')basic.push(child);else advanced.push(child);
+        });
+        var guide=node('section','at-card at-padded at-guide',[node('h3','',label('Сайты → группа → подключение')),node('p','at-footnote',label('1. Добавьте подключение. 2. Создайте группу сайтов. 3. Выберите для неё маршрут и проверку профилей. Затем сохраните и примените изменения.')),self.button('Настроить по вопросам',function(){self.setupWizard();},'primary',self.busy()),node('p','at-footnote',label(self.data.settings.group_order ? 'Группы проверяются сверху вниз вместе со своими списками. Первое совпадение определяет маршрут; глобальные исключения остаются выше.' : 'Сохранён прежний порядок правил. Мастер предложит явный порядок групп; перед применением просмотрите итог.'))]);
+        content.replaceChildren.apply(content,[guide].concat(basic,[atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Дополнительные правила, списки и диагностика'),node('div','at-content at-advanced-content',advanced)])]));
+        return content;
+    },
+    wizardWait: function() {
+        var self=this,deadline=Date.now()+120000;
+        function wait(){return result(api.status()).then(function(d){self.data=d;var job=d.job || {};if(job.status==='error')throw new Error(job.message || 'Операция не завершилась');if(['queued','running'].indexOf(job.status)<0)return d;if(Date.now()>deadline)throw new Error('Обновление ещё выполняется. Дождитесь его завершения и повторите сохранение группы.');return new Promise(function(resolve){setTimeout(resolve,900);}).then(wait);});}
+        return wait();
+    },
+    setupWizard: function() {
+        var self=this,s=self.data.settings,step=0,enabled=(self.data.subscriptions || []).filter(function(x){return x.enabled;}),draft={name:'Новая группа',source:enabled.length ? enabled[0].id : 'new',sourceName:'Новое подключение',sourceURL:'',domains:'',preset:'custom',policy:'proxy',selection:'auto',profile:'',testURL:'',marker:'',interval:60,mode:s.mode || 'rules',fakeip:!!s.fakeip,dhcp:!!s.dhcp_dns_enabled};
+        var busy=false,saved=false,msg=node('p','at-inline-error'),collect=function(){};
+        function input(key,placeholder,type){var n=node('input','at-input at-wizard-'+key,[],{value:draft[key],placeholder:placeholder || '',type:type || 'text'});n.addEventListener('input',function(){draft[key]=n.value;});return n;}
+        function select(key,options){var n=node('select','at-input at-wizard-'+key,options.map(function(o){return atlasElement('option',{value:o[0],selected:draft[key]===o[0]},o[1]);}));n.addEventListener('change',function(){draft[key]=n.value;});return n;}
+        function draw(){
+            var body=[], titles=['Откуда брать профили?','Какие сайты объединить?','Куда направлять эту группу?','Как выбирать работающий профиль?','Как обрабатывать DNS и остальные сайты?','Проверьте итог перед сохранением'];
+            msg=node('p','at-inline-error');collect=function(){};
+            if(step===0){var sourcePicker=select('source',enabled.map(function(x){return [x.id,x.name+' · '+x.count+' профилей'];}).concat([['new','Добавить ссылку подписки'],['none','Без подключения: напрямую или блокировать']]));sourcePicker.addEventListener('change',draw);body=[self.field('Подключение',sourcePicker)];if(draft.source==='new')body.push(self.field('Название нового подключения',input('sourceName','Например, домашняя подписка')),self.field('Ссылка новой подписки',input('sourceURL','https://provider.example/sub','password')));body.push(node('p','at-footnote',label('Подписка — ссылка провайдера, из которой Atlas получает профили. Она сохраняется на роутере. Для прямого маршрута или блокировки выберите «Без подключения». Для отдельных URI сначала используйте импорт в «Подключениях».')));collect=function(){if(draft.source==='new' && (!draft.sourceName.trim() || !/^https:\/\//.test(draft.sourceURL)))throw new Error('Для новой подписки нужны название и HTTPS ссылка');};}
+            if(step===1){var domains=node('textarea','at-input at-textarea at-wizard-domains',label(draft.domains),{rows:5,placeholder:'example.org\nexample.net'});domains.addEventListener('input',function(){draft.domains=domains.value;});var preset=select('preset',[['custom','Мои сайты'],['youtube','YouTube'],['hdrezka','HDRezka — список актуальных доменов']]);preset.addEventListener('change',function(){if(preset.value==='youtube'){draft.name='YouTube';draft.domains='youtube.com\ngooglevideo.com\nytimg.com';draft.testURL='https://www.youtube.com/';}else if(preset.value==='hdrezka'){draft.name='HDRezka';draft.domains='';draft.testURL='';}draw();});body=[self.field('Готовый набор сайтов',preset),self.field('Название группы',input('name','Например, видео')),self.field('Сайты этой группы',domains,'По одному домену на строку, без https:// и пути. Поддомены включены.'),node('p','at-footnote',label(draft.preset==='hdrezka' ? 'Будет добавлен общественный список HDRezka. В следующем шаге укажите фактическое зеркало для проверки. Ни одна ссылка не гарантирует работу всех зеркал.' : 'Например, группа «Видео» может содержать несколько сайтов, использующих одинаковый набор профилей.'))];collect=function(){if(!draft.name.trim())throw new Error('Назовите группу');if(!lines(draft.domains).length && draft.preset==='custom')throw new Error('Добавьте хотя бы один домен');};}
+            if(step===2){collect=function(){if(draft.policy==='proxy' && draft.source==='none')throw new Error('Для прокси вернитесь к первому шагу и выберите подключение.');};body=[self.field('Маршрут группы',select('policy',[['proxy','Через выбранное подключение'],['direct','Напрямую, через провайдера'],['block','Блокировать доступ']])),node('p','at-footnote',label('Прокси использует профили выбранного подключения. Прямой маршрут показывает сайту IP вашего провайдера. Блокировка запрещает соединения с сайтами группы. Остальные сайты задаются отдельно.'))];}
+            if(step===3){var profiles=(self.data.nodes || []).filter(function(n){return draft.source!=='new' && draft.source!=='none' && n.key.indexOf(draft.source)===0;});body=[];if(draft.policy==='proxy'){var selection=select('selection',[['auto','Автоматически выбирать работающий'],['manual','Использовать один профиль']]);selection.addEventListener('change',draw);body.push(self.field('Выбор профиля',selection));if(draft.selection==='manual')body.push(self.field('Профиль для ручного выбора',select('profile',[['','Выберите профиль']].concat(profiles.map(function(n){return [n.key,n.name];})))));else body.push(self.field('Адрес сайта для проверки',input('testURL','https://www.youtube.com/','url')),self.field('Текст на странице',input('marker','Необязательно: YouTube')),self.field('Интервал проверки, секунд',input('interval','60','number')),node('p','at-footnote',label('Atlas выбирает профиль, который получил HTTP 200 от указанного сайта и нашёл заданный текст, если он указан. Проверяется страница, а не воспроизведение видео. Пустой URL оставляет общий тест задержки. Для разных сайтов создавайте разные группы. При отсутствии подходящего профиля группа блокируется; остальные маршруты сохраняются. Проверки выполняются постепенно, с ограничением времени и числа попыток.')));}else body=[node('p','',label('Для прямого маршрута и блокировки профиль и перебор не нужны.'))];collect=function(){if(draft.policy!=='proxy')return;if(draft.selection==='manual'){if(!draft.profile)throw new Error('Выберите профиль. Для новой подписки сначала используйте автоматический режим.');return;}if(draft.testURL && !/^https:\/\//.test(draft.testURL))throw new Error('Укажите окончательный HTTPS адрес сайта');if(!Number.isInteger(Number(draft.interval)) || Number(draft.interval)<30 || Number(draft.interval)>1800)throw new Error('Интервал — целое число от 30 до 1800 секунд');};}
+            if(step===4){var fake=node('input','at-wizard-fakeip',[],{type:'checkbox',checked:draft.fakeip}),dhcp=node('input','at-wizard-dhcp',[],{type:'checkbox',checked:draft.dhcp});fake.addEventListener('change',function(){draft.fakeip=fake.checked;});dhcp.addEventListener('change',function(){draft.dhcp=dhcp.checked;});body=[self.field('Остальные сайты',select('mode',[['rules','Напрямую; через прокси только заданные группы'],['global','Через общий прокси, кроме исключений']])),node('label','at-checkbox',[fake,label('Использовать FakeIP для проксируемых доменов')]),node('label','at-checkbox',[dhcp,label('Направлять DNS dnsmasq в Atlas')]),node('p','at-footnote',label('Эти три настройки общие для Atlas, а не только для новой группы. FakeIP помогает доменной маршрутизации. Интеграция DNS работает для устройств, использующих DNS роутера; встроенный DoH браузера требует отдельной проверки. Остальные настройки безопасности сохраняются.'))];}
+            if(step===5){var source=enabled.find(function(x){return x.id===draft.source;});body=[node('div','at-wizard-review',[node('h3','',label(draft.name)),node('p','',label('Сайты: '+(lines(draft.domains).join(', ') || 'общественный список '+draft.preset))),node('p','',label('Маршрут: '+({proxy:'прокси',direct:'напрямую',block:'блокировать'}[draft.policy]))),node('p','',label('Подключение: '+(draft.policy!=='proxy' ? 'не требуется' : source ? source.name : draft.sourceName))),node('p','',label('Выбор: '+(draft.policy!=='proxy' ? 'не требуется' : draft.selection==='auto' ? 'автоматический' : 'ручной'))),node('p','',label('Проверка: '+(draft.policy!=='proxy' || draft.selection==='manual' ? 'не требуется' : draft.testURL || 'общий HTTPS тест задержки'))),node('p','',label('Остальные сайты: '+(draft.mode==='rules' ? 'напрямую' : 'общий прокси'))),node('p','at-footnote',label('Новая группа станет первой среди обычных групп. Будет включён порядок «группа вместе со своими списками». Глобальные исключения сохраняют приоритет. Существующие группы, подключения и секреты сохраняются.'))])];}
+            var actions=[self.button('Отмена',function(){ui.hideModal();},'ghost',busy)];
+            if(step>0)actions.push(self.button('Назад',function(){step--;draw();},'ghost',busy||saved));
+            if(step<5)actions.push(self.button('Далее',function(){try{collect();step++;draw();}catch(e){msg.textContent=e.message;}},'primary',busy));
+            else {actions.push(self.button('Сохранить без перезапуска',function(){return save(false);},'ghost',busy));actions.push(self.button('Сохранить и применить',function(){return save(true);},'primary',busy));}
+            ui.showModal('Настройка по вопросам · '+(step+1)+' из 6',[node('div','at-modal at-wizard',[node('h2','',label(titles[step])),node('div','at-wizard-body',body),msg]),node('div','at-actions at-wizard-actions',actions)]);
+        }
+        function save(apply){
+            if(busy)return Promise.resolve();busy=true;draw();
+            var promise=Promise.resolve(draft.source);
+            if(!saved && draft.source==='new' && draft.policy==='proxy')promise=result(api.saveSubscription('',draft.sourceName.trim(),draft.sourceURL,true,'',false)).then(function(){return result(api.status());}).then(function(d){self.data=d;var sub=d.subscriptions.find(function(x){return x.name===draft.sourceName.trim();});if(!sub)throw new Error('Новая подписка не найдена');draft.source=sub.id;enabled=d.subscriptions.filter(function(x){return x.enabled;});return result(api.action('refresh',sub.id)).then(function(){return self.wizardWait();}).then(function(){return sub.id;});});
+            return promise.then(function(sourceID){
+                if(saved)return;
+                if(draft.policy==='proxy' && !(self.data.nodes || []).some(function(n){return n.key.indexOf(sourceID)===0;}))throw new Error('В подключении нет пригодных профилей. Подключение сохранено; проверьте его в разделе «Подключения».');var current=self.data.settings, id=self.newGroupId(),group={id:id,name:draft.name.trim(),enabled:true,policy:draft.policy,domains:lines(draft.domains),cidrs:[],source_ips:[],pool:draft.policy==='proxy' ? sourceID : '',auto_interval_seconds:draft.policy==='proxy' ? Number(draft.interval) : null,site_checks:draft.policy==='proxy' && draft.selection==='auto' && draft.testURL ? [{url:draft.testURL.trim(),statuses:[200],contains:draft.marker}] : []};
+                if((current.sections || []).some(function(x){return x.name.toLowerCase()===group.name.toLowerCase();}))throw new Error('Группа с таким названием уже существует. Вернитесь и измените название.');
+                var lists=(current.remote_lists || []).slice();
+                if(draft.preset!=='custom')lists.unshift({id:self.newGroupId(),name:draft.name+' / '+draft.preset,url:'https://github.com/itdoginfo/allow-domains/releases/latest/download/'+draft.preset+'.srs',policy:draft.policy,format:'srs',enabled:true,section:id,domains:[],cidrs:[]});
+                var choices=Object.assign({},current.section_choices || {});if(draft.policy==='proxy' && draft.selection==='manual')choices['section_'+id+'_control']=draft.profile;
+                var settings=Object.assign({},current,{sections:[group].concat(current.sections || []),remote_lists:lists,section_choices:choices,group_order:true,mode:draft.mode,fakeip:draft.fakeip,dhcp_dns_enabled:draft.dhcp});
+                return result(api.saveSettings(settings)).then(function(){saved=true;});
+            }).then(function(){if(apply)return result(api.action('apply','')).then(function(){return self.wizardWait();});}).then(function(){ui.hideModal();return self.reload();}).catch(function(e){busy=false;draw();msg.textContent=(saved ? 'Настройки сохранены, но применение не завершилось. Можно повторить применение без добавления второй группы. ' : '')+(e.message || 'Настройки не удалось сохранить');});
+        }
+        draw();
+    },
+    newGroupId: function(){var bytes=new Uint8Array(8);crypto.getRandomValues(bytes);return Array.from(bytes).map(function(x){return ('0'+x.toString(16)).slice(-2);}).join('');},
+
+    privacyLayout: function(content) {
+        var basic=[],advanced=[];
+        Array.from(content.children).forEach(function(child){var text=child.textContent || '';if(text.indexOf('Проверка безопасности с этого устройства')===0 || text.indexOf('Проверка приватности')===0 || text.indexOf('Функциональная самопроверка')===0)basic.push(child);else advanced.push(child);});
+        content.replaceChildren.apply(content,basic.concat([atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Подробный аудит, FakeIP и сетевые инструменты'),node('div','at-content at-advanced-content',advanced)])]));return content;
+    },
+    securityCard: function() {
+        var self=this,stun=node('input','at-security-stun',[],{type:'checkbox',checked:!!self.securityStun}),report=self.clientSecurity || {};
+        stun.addEventListener('change',function(){self.securityStun=stun.checked;});
+        var names={ipv4:'Выход IPv4',ipv6:'Выход IPv6',webrtc:'WebRTC',dns:'Внешняя утечка DNS'},states={match:'Совпадает',leak:'Утечка подтверждена',direct:'Прямой маршрут',different:'Другой выход',unknown:'Не подтверждено',unchecked:'Не проверено'};
+        return node('section','at-card at-padded at-security-card',[node('h3','',label('Проверка безопасности с этого устройства')),node('p','at-footnote',label('Сначала измерьте общий прокси и прямой выход роутера, затем сравните с браузером. Разные группы могут использовать разные выходы. Прямой маршрут в режиме групп не считается автоматическим доказательством утечки.')),
+            node('div','at-security-steps',[self.button('1. Измерить выходы роутера',function(){return self.action('privacy');},'ghost',self.busy() || !self.data.nodes.length),self.button('2. Проверить браузер и сравнить',function(){return self.clientPrivacyTest({compare:true,stun:!!self.securityStun});},'primary',self.busy())]),
+            node('label','at-checkbox',[stun,label('Дополнительно проверить WebRTC через внешний STUN')]),node('p','at-footnote',label('По нажатию IP-сервисы api.ipify.org и api6.ipify.org увидят ваш выходной адрес. При включённом STUN запрос получает stun.l.google.com. Камера и микрофон не используются. Адреса браузера передаются вашему роутеру для сравнения, но не записываются в журнал или состояние. Измеренные выходы сохраняются только как отпечатки на время работы Atlas.')),
+            node('div','at-privacy-list',(report.checks || []).map(function(c){return node('div','at-security-result',[pill(states[c.state] || c.state,c.state==='leak' ? 'danger' : c.state==='match' ? 'success' : 'neutral'),node('div','',[node('strong','',label(names[c.id] || c.id)),node('p','at-footnote',label(c.message))])]);})),
+            node('p','at-footnote',label(report.notice || 'Недоступный тест получает статус «Не подтверждено», а не «Защита работает». IPv6 без измеренного выхода прокси остаётся неопределённым.')),
+            node('div','at-actions',[atlasElement('a',{'class':'at-btn ghost',href:'https://www.dnsleaktest.com/',target:'_blank',rel:'noopener noreferrer'},'3. Внешняя проверка DNS'),atlasElement('a',{'class':'at-btn ghost',href:'https://browserleaks.com/webrtc',target:'_blank',rel:'noopener noreferrer'},'Проверка WebRTC другим сервисом'),self.button('Показать признаки браузера',function(){self.browserFingerprintDialog();},'ghost')]),node('p','at-footnote',label('Внешние страницы увидят IP и диагностические запросы. DNS-тест проводится на самом устройстве: аудит роутера не определяет DNS-over-HTTPS браузера. Atlas не обещает неотслеживаемость: вход в аккаунт, cookies и отпечаток браузера могут идентифицировать пользователя при смене IP.'))]);
+    },
+    browserFingerprintDialog: function() {
+        var items=['Языки: '+(navigator.languages || [navigator.language]).join(', '),'Платформа: '+navigator.platform,'Часовой пояс: '+Intl.DateTimeFormat().resolvedOptions().timeZone,'Размер экрана: '+screen.width+' × '+screen.height,'Cookies: '+(navigator.cookieEnabled ? 'разрешены' : 'выключены')];
+        ui.showModal('Признаки, доступные сайтам',[node('p','at-footnote',label('Эти сведения считываются локально и не отправляются внешнему сервису. Это примеры признаков отпечатка, а не оценка уникальности вашего браузера.')),node('div','',items.map(function(t){return node('p','',label(t));})),atlasElement('button',{'class':'btn',click:ui.hideModal},'Закрыть')]);
+    },
+
     sectionDialog: function(section, commit) {
         var self = this, original = Object.assign({}, section || {});
         function show(config) {
@@ -409,6 +551,7 @@ return view.extend({
             var autoInterval = node('input','at-input at-section-auto-interval',[],{type:'number',min:30,max:1800,value:original.auto_interval_seconds == null ? '' : original.auto_interval_seconds,placeholder:'Наследовать'});
             var autoTolerance = node('input','at-input at-section-auto-tolerance',[],{type:'number',min:1,max:2000,value:original.auto_tolerance_ms == null ? '' : original.auto_tolerance_ms,placeholder:'Наследовать'});
             var extensions = self.urltestExtensions(original);
+            var sites = self.siteCheckFields(original);
             var autoUrl = node('input','at-input at-section-auto-url',[],{value:original.urltest_url || '',placeholder:'Наследовать общий HTTPS URL'});
             var sectionUot = node('select','at-input at-section-uot',[atlasElement('option',{value:'inherit',selected:original.udp_over_tcp == null},'Наследовать общую настройку'),atlasElement('option',{value:'on',selected:original.udp_over_tcp === true},'Включить'),atlasElement('option',{value:'off',selected:original.udp_over_tcp === false},'Выключить')]);
             var sectionUotVersion = node('select','at-input at-section-uot-version',[atlasElement('option',{value:'inherit',selected:original.udp_over_tcp_version == null},'Наследовать общую версию'),atlasElement('option',{value:'1',selected:original.udp_over_tcp_version === 1},'1'),atlasElement('option',{value:'2',selected:original.udp_over_tcp_version === 2},'2')]);
@@ -422,31 +565,32 @@ return view.extend({
             var username = node('input', 'at-input at-section-username', [], { value: listener.username || '', autocomplete: 'off' });
             var password = node('input', 'at-input at-section-password', [], { type: 'password', autocomplete: 'new-password', placeholder: original.id ? 'Пусто — сохранить прежний пароль' : 'Не менее 12 символов' });
             var msg = node('p', 'at-inline-error');
-            ui.showModal(original.name ? 'Изменить секцию' : 'Новая секция', [node('div', 'at-modal', [
-                self.field('Название', name), node('label', 'at-checkbox', [enabled, label('Секция включена')]), self.field('Действие', policy), self.field('Пул подписки', pool), self.field('Исходящий VPN-интерфейс', iface),
+            ui.showModal(original.name ? 'Изменить группу' : 'Новая группа', [self.sectionLayout(node('div', 'at-modal', [
+                self.field('Название', name), node('label', 'at-checkbox', [enabled, label('Группа включена')]), self.field('Действие', policy), self.field('Подключение для группы', pool), self.field('Исходящий VPN-интерфейс', iface),
                 node('div', 'at-grid-2', [self.field('Домены', fields.domains), self.field('IP назначения / CIDR', fields.cidrs), self.field('IP устройств / CIDR', fields.source_ips), self.field('Входящие интерфейсы', fields.source_interfaces), self.field('Порты: 443,10000-20000', fields.ports), self.field('Транспорт: tcp,udp', fields.networks)]),
                 self.field('DNS resolver для доменов', resolver), self.field('Разрешение реального IP',resolveIp),
                 node('p','at-footnote',label('Отдельный DNS применяется к доменам секции независимо от портов и TCP/UDP соединений. Устройства и входящие интерфейсы учитываются, когда DNS-запрос сохраняет эти признаки. DNS-запрос не содержит порт будущего соединения.')),
                 node('p','at-footnote',label('ID секций для экспертных связей: '+(self.data.settings.sections || []).map(function(x){return x.name+': '+x.id;}).join(' · '))),
-                extensions.element,
+                sites.element, extensions.element,
                 atlasElement('details',{},[atlasElement('summary',{},'UDP через TCP для этой секции'),self.field('UDP-over-TCP',sectionUot),self.field('Версия',sectionUotVersion),node('p','at-footnote',label('Для SOCKS и Shadowsocks обычного пула. Сервер должен поддерживать выбранную версию. Секция получает отдельные копии выходов; соседние секции сохраняют свои настройки. В экспертном JSON параметр задаётся в самом outbound.'))]),
                 atlasElement('details',{},[atlasElement('summary',{},'Автопроверка серверов этой секции'),self.field('Интервал, секунд',autoInterval),self.field('Допустимая разница задержки, мс',autoTolerance),self.field('HTTPS URL проверки',autoUrl),node('p','at-footnote',label('Пустые поля наследуют общие значения. Для обычного прокси-пула заполненные поля создают независимый selector и URLTest. В экспертном JSON параметры URLTest задаются самим JSON.'))]),
                 atlasElement('details',{},[atlasElement('summary',{},'Исключения только из этой секции'),node('div','at-grid-2',[self.field('Исключить домены',fields.exclude_domains),self.field('Исключить IP назначения / CIDR',fields.exclude_cidrs),self.field('Исключить устройства / CIDR',fields.exclude_source_ips)]),node('p','at-footnote',label('Исключённый трафик проверяется следующими правилами. Это не глобальный прямой маршрут. IP назначения проверяется по известному движку адресу; для доменов с FakeIP используйте доменные исключения.'))]),
                 atlasElement('details', {}, [atlasElement('summary', {}, 'JSON outbound — расширенная конфигурация'), self.field('Объект, список или {"outbounds": […]}', json), node('p', 'at-footnote', label('Первый outbound — выход секции. Можно указать selector/urltest и связанные узлы с уникальными tag. Для связи с другой экспертной секцией используйте section_<ID секции>_<tag узла>. Несуществующие или выключенные выходы и циклы отвергаются при проверке конфигурации. Параметры протоколов проверяет установленный sing-box. Фильтры подписочного автовыбора к этому JSON не применяются. [] возвращает подписочный пул. Этот JSON может содержать пароли; доступен только администратору.'))]),
                 node('label', 'at-checkbox', [mixed, label('Отдельный HTTP/SOCKS-прокси этой секции')]), node('div', 'at-grid-2', [self.field('LAN или loopback IP', bind), self.field('Порт', port), self.field('Имя пользователя', username), self.field('Пароль', password)]),
                 node('p', 'at-footnote', label('Весь трафик этого HTTP/SOCKS-прокси использует выход секции. Порт должен быть уникальным. Изменения пока остаются в форме; затем сохраните правила и примените их.')), msg
-            ]), node('div', 'right', [atlasElement('button', { 'class': 'btn', click: ui.hideModal }, 'Отмена'), self.button('Добавить в форму', function() {
+            ])), node('div', 'right', [atlasElement('button', { 'class': 'btn', click: ui.hideModal }, 'Отмена'), self.button('Добавить в форму', function() {
                 try {
                     var value = JSON.parse(json.value || '[]');
                     if (value && !Array.isArray(value) && value.outbounds && Object.keys(value).length === 1) value = value.outbounds;
                     if (!Array.isArray(value)) value = [value];
-                    var updated = Object.assign({}, original, { name: name.value.trim(), enabled: enabled.checked, policy: policy.value, pool: pool.value, interface: iface.value.trim(), resolver: resolver.value.trim(), outbound_config: value, mixed_proxy: {enabled:mixed.checked,listen:bind.value.trim(),port:Number(port.value),username:username.value.trim(),password:password.value || listener.password || ''} });
+                    var updated = Object.assign({}, original, { id:original.id || self.newGroupId(), name: name.value.trim(), enabled: enabled.checked, policy: policy.value, pool: pool.value, interface: iface.value.trim(), resolver: resolver.value.trim(), outbound_config: value, mixed_proxy: {enabled:mixed.checked,listen:bind.value.trim(),port:Number(port.value),username:username.value.trim(),password:password.value || listener.password || ''} });
                     updated.resolve_real_ip=resolveIp.value==='inherit' ? null : resolveIp.value==='on';
                     updated.udp_over_tcp=sectionUot.value==='inherit' ? null : sectionUot.value==='on';
                     updated.udp_over_tcp_version=sectionUotVersion.value==='inherit' ? null : Number(sectionUotVersion.value);
                     updated.auto_interval_seconds=autoInterval.value.trim() ? Number(autoInterval.value) : null;
                     updated.auto_tolerance_ms=autoTolerance.value.trim() ? Number(autoTolerance.value) : null;
                     updated.urltest_url=autoUrl.value.trim();
+                    updated.site_checks=policy.value==='proxy' ? sites.values() : [];
                     Object.assign(updated,extensions.values());
                     delete updated.outbound_config_set;
                     Object.keys(fields).forEach(function(k) { updated[k] = lines(fields[k].value); });
@@ -464,8 +608,8 @@ return view.extend({
         var self = this, d = self.data, s = d.settings;
         var mode = node('select', 'at-input', [atlasElement('option', { value: 'rules', selected: s.mode === 'rules' }, 'По правилам — остальное напрямую'), atlasElement('option', { value: 'global', selected: s.mode === 'global' }, 'Весь трафик — кроме исключений')]);
         var inputs = {};
-        ['domains', 'cidrs', 'bypass_domains', 'bypass_cidrs'].forEach(function(k) { inputs[k] = node('textarea', 'at-input at-textarea', label(s[k].join('\n')), { rows: 6, spellcheck: 'false', placeholder: k.indexOf('domains') >= 0 ? 'example.org\nexample.net' : '203.0.113.0/24\n2001:db8::/32' }); });
-        ['routed_source_ips', 'routing_excluded_ips'].forEach(function(k) { inputs[k] = node('textarea', 'at-input at-textarea', label((s[k] || []).join('\n')), { rows: 4, spellcheck: 'false', placeholder: '192.168.1.25/32\n2001:db8::25/128' }); });
+        ['domains', 'cidrs', 'bypass_domains', 'bypass_cidrs'].forEach(function(k) { inputs[k] = node('textarea', 'at-input at-textarea at-route-' + k, label(s[k].join('\n')), { rows: 6, spellcheck: 'false', placeholder: k.indexOf('domains') >= 0 ? 'example.org\nexample.net' : '203.0.113.0/24\n2001:db8::/32' }); });
+        ['routed_source_ips', 'routing_excluded_ips'].forEach(function(k) { inputs[k] = node('textarea', 'at-input at-textarea at-route-' + k, label((s[k] || []).join('\n')), { rows: 4, spellcheck: 'false', placeholder: '192.168.1.25/32\n2001:db8::25/128' }); });
         var blocked = node('textarea', 'at-input at-textarea', label((s.blocked_domains || []).join('\n')), { rows: 6, spellcheck: 'false', placeholder: 'ads.example\ntracker.example' });
         var sections = node('textarea', 'at-input at-textarea', label((s.sections || []).map(function(x) { return [x.name, x.policy, x.domains.join(','), x.cidrs.join(','), x.source_ips.join(','), x.pool || '', x.interface || '', x.resolver || '', (x.source_interfaces || []).join(','), (x.ports || []).join(','), (x.networks || []).join(',')].join(' | '); }).join('\n')), { rows: 7, spellcheck: 'false', placeholder: 'Работа | proxy | corp.example | | 192.168.1.25/32 | <ID подписки или пусто> | | | br-lan\nVPN intranet | interface | intranet.example | | | | wg0 | https://dns.example/dns-query |\nИсключить | exclude | local.example | | | | | |' });
 
@@ -477,17 +621,19 @@ return view.extend({
             serializedSections = sections.value;
             sectionList.replaceChildren.apply(sectionList, sectionDraft.map(function(x, index) {
                 function move(delta) { var other = index + delta; if (other < 0 || other >= sectionDraft.length) return; var saved=sectionDraft[index];sectionDraft[index]=sectionDraft[other];sectionDraft[other]=saved;syncSections(); }
-                return node('article', 'at-card at-padded', [node('strong', '', label(x.name)), node('p', 'at-footnote', label((x.enabled === false ? 'Выключена · ' : '') + x.policy + (x.outbound_config_set || (x.outbound_config || []).length ? ' · JSON outbound' : '') + (x.mixed_proxy && x.mixed_proxy.enabled ? ' · HTTP/SOCKS ' + x.mixed_proxy.listen + ':' + x.mixed_proxy.port : ''))), node('div','at-actions',[
-                    self.button('Изменить секцию', function() { return self.sectionDialog(x, function(value) { if(sectionDraft.some(function(y,i){return i!==index&&y.name.toLowerCase()===value.name.toLowerCase();})) throw new Error('Название секции уже используется');sectionDraft[index]=value;syncSections(); }); }, '', self.busy()),
-                    self.button('Копировать сохранённую',function(){self.cloneSectionDialog(x);},'ghost',self.busy()||!x.id),
+                return node('article', 'at-card at-padded', [node('strong', '', label(x.name)), node('p', 'at-footnote', label((x.enabled === false ? 'Выключена · ' : '') + ({proxy:'Прокси',direct:'Напрямую',exclude:'Исключение',block:'Блокировать',interface:'VPN'}[x.policy] || x.policy) + (x.outbound_config_set || (x.outbound_config || []).length ? ' · JSON outbound' : '') + (x.mixed_proxy && x.mixed_proxy.enabled ? ' · HTTP/SOCKS ' + x.mixed_proxy.listen + ':' + x.mixed_proxy.port : ''))), node('p','at-footnote',label((x.domains || []).slice(0,4).join(', ')+(x.domains && x.domains.length>4 ? ' и ещё '+(x.domains.length-4) : '')+' · списков: '+(s.remote_lists || []).filter(function(l){return l.section===x.id;}).length+' · '+(x.site_checks && x.site_checks.length ? 'Автовыбор по доступности '+x.site_checks.length+' сайтов' : x.policy==='proxy' ? 'Общая проверка профилей' : 'Профиль не требуется'))),node('div','at-actions',[
+                    self.button('Изменить группу', function() { return self.sectionDialog(x, function(value) { if(sectionDraft.some(function(y,i){return i!==index&&y.name.toLowerCase()===value.name.toLowerCase();})) throw new Error('Название секции уже используется');sectionDraft[index]=value;syncSections(); }); }, '', self.busy()),
+                    self.button('Списки группы',function(){groupLists(x);},'ghost',self.busy()||!x.id),self.button('Копировать сохранённую',function(){self.cloneSectionDialog(x);},'ghost',self.busy()||!x.id),
                     self.button('↑',function(){move(-1);},'ghost',index===0||self.busy()),self.button('↓',function(){move(1);},'ghost',index===sectionDraft.length-1||self.busy()),
-                    self.button('Удалить из формы',function(){sectionDraft.splice(index,1);syncSections();},'danger-link',self.busy())
+                    self.button('Удалить из формы',function(){sectionDraft.splice(index,1);syncSections();ui.addNotification(null,node('p','',label('Группа удалена из формы. При сохранении связанные списки будут выключены; их источники и кеш сохраняются.')),'info');},'danger-link',self.busy())
                 ])]);
             }));
         }
         syncSections();
-        var addSection = self.button('+ Секция', function() { return self.sectionDialog(null, function(value) { if(sectionDraft.some(function(x){return x.name.toLowerCase()===value.name.toLowerCase();})) throw new Error('Название секции уже используется');sectionDraft.push(value);syncSections(); }); }, 'primary', self.busy());
+        var addSection = self.button('+ Группа', function() { return self.sectionDialog(null, function(value) { if(sectionDraft.some(function(x){return x.name.toLowerCase()===value.name.toLowerCase();})) throw new Error('Название секции уже используется');sectionDraft.push(value);syncSections(); }); }, 'primary', self.busy());
 
+        function saveRules(apply){ var parsedSections = sections.value === serializedSections ? JSON.parse(JSON.stringify(sectionDraft)) : sections.value.split(/\r?\n/).map(function(x) { return x.trim(); }).filter(Boolean).map(function(line, i) { var parts = line.split('|').map(function(x) { return x.trim(); }); if (parts.length < 8 || parts.length > 11) throw new Error('Секция в строке ' + (i + 1) + ': нужно от 8 до 11 полей, разделённых символом |'); return Object.assign({}, sectionDraft.filter(function(x) { return x.name === parts[0]; })[0] || {}, { name: parts[0], policy: parts[1], domains: parts[2] ? parts[2].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], cidrs: parts[3] ? parts[3].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], source_ips: parts[4] ? parts[4].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], pool: parts[5], interface: parts[6], resolver: parts[7], source_interfaces: parts[8] ? parts[8].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], ports: parts[9] ? parts[9].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], networks: parts[10] ? parts[10].split(',').map(function(x) { return x.trim().toLowerCase(); }).filter(Boolean) : [] }); }); var parsedLists = remoteLists.value.split(/\r?\n/).map(function(x) { return x.trim(); }).filter(Boolean).map(function(line, i) { var parts = line.split('|').map(function(x) { return x.trim(); }); if (parts.length !== 6 && parts.length !== 7) throw new Error('Список в строке ' + (i + 1) + ': нужно 6 или 7 полей, разделённых символом |'); return { name: parts[0], url: parts[1], policy: parts[2], format: parts[3], enabled: parts[4] === 'on', id: parts[5] || undefined, interface: parts[6] || '', section: listSectionChoices[parts[5] || String(i)] ? listSectionChoices[parts[5] || String(i)].value : '', allow_private: !!(listPermissions[parts[5] || String(i)] && listPermissions[parts[5] || String(i)].privateAccess.checked), allow_symlinks: !!(listPermissions[parts[5] || String(i)] && listPermissions[parts[5] || String(i)].symlinks.checked) }; }); parsedLists.forEach(function(item){if(item.section && !parsedSections.some(function(g){return g.id===item.section;})){item.section='';item.enabled=false;}});var settings = Object.assign({}, s, { group_order:groupOrder.checked, mode: mode.value, blocked_domains: lines(blocked.value), remote_lists: parsedLists, list_max_bytes:Math.round(Number(listMaxBytes.value)*1048576), fetch_lists_via_proxy: fetchListsViaProxy.checked, fetch_lists_subscription: fetchListsSection.value ? '' : fetchListsSubscription.value, fetch_lists_section: fetchListsSection.value, disable_quic: disableQuic.checked, exclude_ntp: excludeNtp.checked, block_known_doh: blockDoh.checked, sections: parsedSections }); Object.keys(inputs).forEach(function(k) { settings[k] = lines(inputs[k].value); }); return result(api.saveSettings(settings)).then(function() { if(apply)return self.action('apply');ui.addNotification(null, node('p', '', label('Правила сохранены. Нажмите «Сохранить и применить», когда готовы.')), 'info'); return self.reload(); }); }
+        var groupOrder=node('input','at-group-order',[],{type:'checkbox',checked:!!s.group_order});
         var disableQuic = node('input', '', [], { type: 'checkbox', checked: !!s.disable_quic });
         var excludeNtp = node('input', '', [], { type: 'checkbox', checked: !!s.exclude_ntp });
         var blockDoh = node('input', '', [], { type: 'checkbox', checked: !!s.block_known_doh });
@@ -496,14 +642,20 @@ return view.extend({
         var fetchListsSection = node('select','at-input at-fetch-section',[atlasElement('option',{value:'',selected:!s.fetch_lists_section},'Не использовать отдельную секцию')].concat((s.sections || []).filter(function(x) {return x.enabled !== false && ['proxy','interface','direct'].indexOf(x.policy)>=0;}).map(function(x) {return atlasElement('option',{value:x.id,selected:s.fetch_lists_section===x.id},x.name);} )));
         var listSectionChoices = {};
         var listPermissions = {};
+        function groupLists(group){
+            var candidates=(s.remote_lists || []).filter(function(item){return item.section===group.id || (!item.section && (item.policy==='proxy' && ['proxy','interface','direct'].indexOf(group.policy)>=0 || item.policy===group.policy && ['direct','block'].indexOf(group.policy)>=0));});
+            var checks=candidates.map(function(item){var control=node('input','',[],{type:'checkbox',checked:item.section===group.id});return {item:item,control:control,element:node('label','at-checkbox',[control,label(item.name)])};});
+            ui.showModal('Списки группы «'+group.name+'»',[node('p','',label('Отметьте подходящие списки. Их сайты будут проверяться вместе с этой группой. Списки другой группы здесь не переназначаются.')),node('div','',checks.map(function(x){return x.element;})),node('p','at-footnote',label(candidates.length ? 'Изменения попадут в текущую форму. После закрытия сохраните правила и примените их.' : 'Подходящих списков пока нет. Готовый набор можно добавить через мастер; собственный источник — в дополнительных настройках.')),self.button('Добавить в форму',function(){checks.forEach(function(x){listSectionChoices[x.item.id].value=x.control.checked ? group.id : '';});ui.hideModal();},'primary'),self.button('Отмена',function(){ui.hideModal();},'ghost')]);
+        }
+
         var listAssignments = node('div','', (s.remote_lists || []).map(function(item,index) {
-            var select = node('select','at-input at-list-section',[atlasElement('option',{value:'',selected:!item.section},'Маршрут из списка')].concat((s.sections || []).filter(function(x) {return x.enabled !== false && ['proxy','interface','direct'].indexOf(x.policy)>=0;}).map(function(x) {return atlasElement('option',{value:x.id,selected:item.section===x.id},x.name);} )));
+            var select = node('select','at-input at-list-section',[atlasElement('option',{value:'',selected:!item.section},'Маршрут из списка')].concat((s.sections || []).filter(function(x) {return x.enabled !== false && (item.policy==='proxy' && ['proxy','interface','direct'].indexOf(x.policy)>=0 || item.policy===x.policy && ['direct','block'].indexOf(x.policy)>=0);}).map(function(x) {return atlasElement('option',{value:x.id,selected:item.section===x.id},x.name);} )));
             listSectionChoices[item.id || String(index)] = select;
             var privateAccess = node('input','at-list-private',[],{type:'checkbox',checked:!!item.allow_private});
             var symlinks = node('input','at-list-symlinks',[],{type:'checkbox',checked:!!item.allow_symlinks});
             listPermissions[item.id || String(index)] = {privateAccess:privateAccess,symlinks:symlinks};
             return node('div','at-card at-padded',[
-                self.field('Выход списка «' + item.name + '»',select,'Для назначения секции выберите политику proxy.'),
+                self.field('Выход списка «' + item.name + '»',select,'Список использует выход выбранной группы. Для прямого маршрута и блокировки политики списка и группы должны совпадать.'),
                 node('label','at-checkbox',[privateAccess,label('Доступ к частным адресам для этого списка')]),
                 node('label','at-checkbox',[symlinks,label('Разрешить символьные ссылки для этого списка')])
             ]);
@@ -559,19 +711,19 @@ return view.extend({
             var count = Number(x.count || 0);
             return node('div', 'at-privacy-row', [pill(x.error ? 'ОШИБКА' : x.updated ? 'ОБНОВЛЁН' : 'ОЖИДАЕТ', x.error ? 'danger' : x.updated ? 'success' : 'neutral'), node('span', '', label(x.name + ' · ' + (x.format === 'srs' ? 'SRS binary' : count + ' правил') + ' · ' + (x.error || (x.updated ? date(x.updated) : 'не загружен'))))]);
         }));
-        return node('div', 'at-content', [self.sectionHead('Куда направлять трафик', 'Исключения имеют приоритет. Локальная сеть всегда доступна напрямую.'),
+        return self.routingLayout(node('div', 'at-content', [self.sectionHead('Куда направлять трафик', 'Исключения имеют приоритет. Локальная сеть всегда доступна напрямую.'),
             self.plannerCard(),
             node('section','at-card at-padded',[node('h3','',label('Журнал службы')),node('p','at-footnote',label('Последние 200 строк Atlas из системного журнала. Доступны только администратору; могут содержать адреса и сведения о подключениях.')),self.button('Показать журнал',function(){return result(api.serviceLogs()).then(function(r){ui.showModal('Журнал Atlas',[node('pre','',label(r.content||'Записей нет')),node('p','at-footnote',label(r.truncated?'Показана последняя часть журнала.':'')),atlasElement('button',{'class':'btn',click:ui.hideModal},'Закрыть')]);});},'ghost',self.busy())]),
-            node('section', 'at-card at-padded', [self.field('Режим маршрутизации', mode)]),
+            node('section', 'at-card at-padded', [self.field('Режим маршрутизации', mode),node('label','at-checkbox',[groupOrder,label('Проверять группы по порядку вместе с их списками')])]),
             node('div', 'at-grid-2', [node('section', 'at-card at-padded', [pill('ЧЕРЕЗ ТУННЕЛЬ', 'purple'), self.field('Домены', inputs.domains, 'По одному на строку. Поддомены включены.'), self.field('IP сети', inputs.cidrs, 'IPv4 и IPv6 в формате CIDR.')]), node('section', 'at-card at-padded', [pill('НАПРЯМУЮ', 'neutral'), self.field('Домены-исключения', inputs.bypass_domains), self.field('IP сети-исключения', inputs.bypass_cidrs)])]),
             node('div', 'at-grid-2', [node('section', 'at-card at-padded', [pill('УСТРОЙСТВА ЧЕРЕЗ ТУННЕЛЬ', 'purple'), self.field('IP устройств / сети', inputs.routed_source_ips, 'Укажите LAN IP устройства или подсеть в CIDR. Локальные адреса назначения остаются напрямую.')]), node('section', 'at-card at-padded', [pill('УСТРОЙСТВА В ОБХОД', 'neutral'), self.field('IP устройств / сети', inputs.routing_excluded_ips, 'Эти устройства используют прямое подключение даже в глобальном режиме.')])]),
-            node('section', 'at-card at-padded', [node('h3', '', label('Независимые секции')), node('p', 'at-footnote', label('Создавайте правила по сайтам, устройствам, сетям, портам и транспорту. Выбирайте прокси, VPN, прямой маршрут или блокировку. Секции обрабатываются сверху вниз; исключения имеют приоритет.')), sectionList, addSection, atlasElement('details', {}, [atlasElement('summary', {}, 'Текстовый формат секций'), node('p','at-footnote',label('Поля через |: имя | действие | домены | CIDR | источник | пул | интерфейс | DNS | входящие интерфейсы | порты | tcp/udp. Для секций с портами/транспортом задавайте FakeIP отдельной доменной секцией. JSON outbound и настройки прокси сохраняются при совпадении имени.')), self.field('Секция на строку', sections)])]),
+            node('section', 'at-card at-padded', [node('h3', '', label('Группы сайтов')), node('p', 'at-footnote', label('Создавайте правила по сайтам, устройствам, сетям, портам и транспорту. Выбирайте прокси, VPN, прямой маршрут или блокировку. Секции обрабатываются сверху вниз; исключения имеют приоритет.')), sectionList, addSection, atlasElement('details', {}, [atlasElement('summary', {}, 'Текстовый формат секций'), node('p','at-footnote',label('Поля через |: имя | действие | домены | CIDR | источник | пул | интерфейс | DNS | входящие интерфейсы | порты | tcp/udp. Для секций с портами/транспортом задавайте FakeIP отдельной доменной секцией. JSON outbound и настройки прокси сохраняются при совпадении имени.')), self.field('Секция на строку', sections)])]),
             node('section', 'at-card at-padded', [node('h3', '', label('Блокировка доменов')), node('p', '', label('DNS-блокировка по доменам. Укажите по одному на строку; устройства с собственным DoH могут обходить фильтр.')), self.field('Реклама, трекеры и другие домены', blocked)]),
             node('section', 'at-card at-padded', [node('h3', '', label('Импорт локального списка')), node('p', 'at-footnote', label('Загрузите UTF-8 файл .txt/.lst/.json размером до 4 МиБ. Записи проверяются на роутере; содержимое хранится только в правилах Atlas.')), self.field('Действие для правил', localTarget), self.field('Файл доменов / CIDR', localFile)]),
             node('section', 'at-card at-padded', [node('h3', '', label('Удалённые списки правил')), node('p', 'at-footnote', label('HTTP/HTTPS и локальные file:/// списки. Количество источников и записей не ограничено отдельным программным лимитом; учитывайте память роутера. Поддерживаются домены, hosts, CIDR, AdGuard DNS, sing-box JSON и SRS. SRS проверяется движком до сохранения; при ошибке загрузки остаётся прежняя рабочая версия. Параметры URL поддерживаются и скрыты в интерфейсе. Credentials запрещены. Локальным файлам расширение не требуется. JSON сохраняет все поддерживаемые движком поля и логические условия. Временные ошибки загрузки повторяются до трёх попыток. Для сохранённого адреса оставьте URL с /[saved].')), self.field('Максимальный размер файла, МиБ',listMaxBytes,'По умолчанию 4; 0 — без ограничения. Для больших списков требуется достаточно памяти.'), self.field('Каталог community lists', communitySelect), node('div', 'at-grid-2', [self.field('Маршрут каталога', communityPolicy), self.field('VPN интерфейс (если выбран)', communityIface)]), self.button('Добавить community list', addCommunityList, 'ghost', self.busy()), node('label', 'at-checkbox', [fetchListsViaProxy, label('Загружать и обновлять списки через прокси Atlas; при сбое прямого fallback нет')]), self.field('Подписка для обновления', fetchListsSubscription, 'Общий авто-пул или отдельный авто-пул подписки.'), self.field('Секция для обновления', fetchListsSection, 'Имеет приоритет над подпиской; после изменения примените настройки.'), node('p', 'at-footnote', label('Для этой опции Atlas должен быть запущен и настройки применены. Запросы идут через закрытый loopback HTTP proxy выбранного пула.')), self.field('Один список на строку: имя | HTTP/HTTPS URL или file:///путь | proxy/direct/exclude/interface/block/dnsblock | auto/domains/hosts/cidrs/adguard/json/srs | on/off | ID | интерфейс', remoteLists), listAssignments, listStatus]),
             node('section', 'at-card at-padded', [node('h3', '', label('Транспорт и синхронизация')), node('label', 'at-checkbox', [disableQuic, label('Блокировать QUIC (UDP/443), чтобы приложения переходили на TCP')]), node('label', 'at-checkbox', [excludeNtp, label('Направлять NTP (UDP/123) напрямую')]), node('label', 'at-checkbox', [blockDoh, label('Блокировать известные DoH серверы на устройствах')]), node('p', 'at-footnote', label('Блок QUIC действует на весь маршрутизируемый трафик. DoH-блокировка закрывает только известные домены; она не обнаруживает все пользовательские серверы.'))]),
-            node('div', 'at-actions', [self.button('Сохранить правила', function() { var parsedSections = sections.value === serializedSections ? JSON.parse(JSON.stringify(sectionDraft)) : sections.value.split(/\r?\n/).map(function(x) { return x.trim(); }).filter(Boolean).map(function(line, i) { var parts = line.split('|').map(function(x) { return x.trim(); }); if (parts.length < 8 || parts.length > 11) throw new Error('Секция в строке ' + (i + 1) + ': нужно от 8 до 11 полей, разделённых символом |'); return Object.assign({}, sectionDraft.filter(function(x) { return x.name === parts[0]; })[0] || {}, { name: parts[0], policy: parts[1], domains: parts[2] ? parts[2].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], cidrs: parts[3] ? parts[3].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], source_ips: parts[4] ? parts[4].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], pool: parts[5], interface: parts[6], resolver: parts[7], source_interfaces: parts[8] ? parts[8].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], ports: parts[9] ? parts[9].split(',').map(function(x) { return x.trim(); }).filter(Boolean) : [], networks: parts[10] ? parts[10].split(',').map(function(x) { return x.trim().toLowerCase(); }).filter(Boolean) : [] }); }); var parsedLists = remoteLists.value.split(/\r?\n/).map(function(x) { return x.trim(); }).filter(Boolean).map(function(line, i) { var parts = line.split('|').map(function(x) { return x.trim(); }); if (parts.length !== 6 && parts.length !== 7) throw new Error('Список в строке ' + (i + 1) + ': нужно 6 или 7 полей, разделённых символом |'); return { name: parts[0], url: parts[1], policy: parts[2], format: parts[3], enabled: parts[4] === 'on', id: parts[5] || undefined, interface: parts[6] || '', section: listSectionChoices[parts[5] || String(i)] ? listSectionChoices[parts[5] || String(i)].value : '', allow_private: !!(listPermissions[parts[5] || String(i)] && listPermissions[parts[5] || String(i)].privateAccess.checked), allow_symlinks: !!(listPermissions[parts[5] || String(i)] && listPermissions[parts[5] || String(i)].symlinks.checked) }; }); var settings = Object.assign({}, s, { mode: mode.value, blocked_domains: lines(blocked.value), remote_lists: parsedLists, list_max_bytes:Math.round(Number(listMaxBytes.value)*1048576), fetch_lists_via_proxy: fetchListsViaProxy.checked, fetch_lists_subscription: fetchListsSection.value ? '' : fetchListsSubscription.value, fetch_lists_section: fetchListsSection.value, disable_quic: disableQuic.checked, exclude_ntp: excludeNtp.checked, block_known_doh: blockDoh.checked, sections: parsedSections }); Object.keys(inputs).forEach(function(k) { settings[k] = lines(inputs[k].value); }); return result(api.saveSettings(settings)).then(function() { ui.addNotification(null, node('p', '', label('Правила сохранены. Примените их в обзоре.')), 'info'); return self.reload(); }); }, 'primary', self.busy())]),
-            node('p', 'at-footnote', label('Доменные правила используют DNS и распознавание TLS/HTTP/QUIC. Клиентский DoH и ECH могут скрывать домен: для таких назначений используйте IP правила или режим всего трафика.'))]);
+            node('div', 'at-actions', [self.button('Сохранить и применить',function(){return saveRules(true);},'primary',self.busy()),self.button('Сохранить правила', function(){return saveRules(false);}, 'primary', self.busy())]),
+            node('p', 'at-footnote', label('Доменные правила используют DNS и распознавание TLS/HTTP/QUIC. Клиентский DoH и ECH могут скрывать домен: для таких назначений используйте IP правила или режим всего трафика.'))]));
     },
 
     jsonDownloadDialog: function(title, filename, data, notice) {
@@ -721,7 +873,8 @@ return view.extend({
             node('p', 'at-footnote', label('Хосты, источники, правила и счётчики могут раскрывать привычки использования сети. LuCI получает их только при открытой этой вкладке; API sing-box привязан к 127.0.0.1.'))
         ]);
     },
-    clientPrivacyTest: function() {
+    clientPrivacyTest: function(options) {
+        options=options || {};var observations={ipv4:'',ipv6:'',webrtc:[],stun:!!options.stun};
         var self = this;
         self.clientPrivacy = ['Проверка выполняется…'];
         self.draw();
@@ -731,6 +884,7 @@ return view.extend({
                 .then(function(r) { if (!r.ok) throw new Error('HTTP'); return r.json(); })
                 .then(function(r) {
                     if (!r || typeof r.ip !== 'string' || r.ip.length > 45 || !/^[0-9a-fA-F:.]+$/.test(r.ip)) throw new Error('IP');
+                    observations[family==='IPv4' ? 'ipv4' : 'ipv6']=r.ip;
                     return family + ': ' + r.ip + ' — адрес, видимый с этого браузера';
                 }).catch(function() { return family + ': ответ не получен (нет маршрута, блокировка или сервис недоступен)'; })
                 .finally(function() { clearTimeout(timer); });
@@ -742,10 +896,10 @@ return view.extend({
                 function done() {
                     if (finished) return;
                     finished = true; clearTimeout(timer); if (pc) pc.close();
-                    resolve('WebRTC без STUN: ' + (addresses.length ? 'локальные ICE адреса: ' + addresses.join(', ') : 'адреса не получены; это не доказывает отсутствие утечек'));
+                    resolve((options.stun ? 'WebRTC со STUN: ' : 'WebRTC без STUN: ') + (addresses.length ? 'локальные ICE адреса: ' + addresses.join(', ') : 'адреса не получены; это не доказывает отсутствие утечек'));
                 }
                 try {
-                    pc = new RTCPeerConnection({ iceServers: [] });
+                    pc = new RTCPeerConnection({ iceServers: options.stun ? [{urls:'stun:stun.l.google.com:19302'}] : [] });
                     timer = setTimeout(done, 4000);
                     pc.onicecandidate = function(event) {
                         if (!event.candidate) { done(); return; }
@@ -753,6 +907,7 @@ return view.extend({
                         if (!address) { var fields = event.candidate.candidate.split(' '); address = fields[4]; }
                         if (address && /^[a-zA-Z0-9:.\-]{1,253}$/.test(address) && addresses.indexOf(address) < 0 && addresses.length < 16) addresses.push(address);
                     };
+                    observations.webrtc=addresses;
                     pc.createDataChannel('atlas-local-check');
                     pc.createOffer().then(function(offer) { return pc.setLocalDescription(offer); }).catch(done);
                 } catch (e) { done(); }
@@ -760,6 +915,7 @@ return view.extend({
         }
         return Promise.all([publicIP('api.ipify.org', 'IPv4'), publicIP('api6.ipify.org', 'IPv6'), rtc()]).then(function(results) {
             self.clientPrivacy = results; self.draw();
+            if(options.compare)return result(api.securityCompare(observations)).then(function(r){self.clientSecurity=r;self.draw();}).catch(function(e){self.clientSecurity={checks:[],notice:'Сравнение недоступно: '+e.message};self.draw();});
         });
     },
     browserFakeipTest: function() {
@@ -784,7 +940,7 @@ return view.extend({
     },
     privacyPage: function() {
         var self = this, p = this.data.privacy || {}, checks = p.checks || [], egress = this.data.privacy_egress || {}, test = this.data.selftest || {};
-        return node('div', 'at-content', [this.sectionHead('Проверка приватности', 'Аудит активной конфигурации Atlas.'),
+        return self.privacyLayout(node('div', 'at-content', [this.securityCard(),this.sectionHead('Проверка приватности', 'Аудит активной конфигурации Atlas.'),
             node('section','at-card at-padded',[node('h3','',label('Firewall и маршрутизация')),node('p','at-footnote',label('Читает таблицы и правила nftables, маршруты IPv4/IPv6 и правила выбора таблиц. Отчёт содержит сетевые адреса и доступен администратору.')),self.button('Проверить nftables',function(){return result(api.nftDiagnostics()).then(function(r){ui.showModal('Диагностика nftables',[node('div','',r.checks.map(function(c){return node('p','',label((c.ok?'OK · ':'ПРОВЕРИТЬ · ')+c.label));})),node('pre','',label(JSON.stringify(r,null,2))),atlasElement('button',{'class':'btn',click:ui.hideModal},'Закрыть')]);});},'ghost',self.busy())]),
             node('section', 'at-card at-padded', [node('h3', '', label('FakeIP в браузере и цепочка прокси')),
                 node('p', 'at-footnote', label('Внешние сервисы fakeip.podkop.fyi и ip.podkop.fyi увидят прямой и прокси IP. Диагностика создаёт исключение прямого маршрута только для первого домена. Результаты остаются в памяти страницы. Проверка не доказывает анонимность.')),
@@ -803,6 +959,8 @@ return view.extend({
             node('section', 'at-card at-padded', [node('div', 'at-section-head', [node('h3', '', label('Проверка с этого браузера')), self.button('Проверить браузер', function() { return self.clientPrivacyTest(); }, 'primary')]),
                 node('div', 'at-privacy-list', (self.clientPrivacy || []).map(function(x) { return node('p', 'at-footnote', label(x)); })),
                 node('p', 'at-footnote', label('По нажатию браузер отправляет запросы к api.ipify.org и api6.ipify.org; сервис видит ваш выходной IP. WebRTC проверяется локально без STUN. Адреса остаются в памяти страницы и не отправляются роутеру. Сравните их с выходом прокси. Доступность IPv6 сама по себе не означает утечку; эта проверка не измеряет DNS/DoH и WebRTC через STUN.'))]),
-            node('section', 'at-card at-padded', [node('h3', '', label('Ограничения проверки')), node('p', 'at-footnote', label('Atlas не видит собственный DoH/VPN клиента и не обещает анонимность. В режиме «По правилам» трафик вне заданных правил идёт напрямую. Для защиты всей сети выберите глобальный режим и дополнительно проверьте соединение с клиентского устройства.'))])]);
+            node('section', 'at-card at-padded', [node('h3', '', label('Ограничения проверки')), node('p', 'at-footnote', label('Atlas не видит собственный DoH/VPN клиента и не обещает анонимность. В режиме «По правилам» трафик вне заданных правил идёт напрямую. Для защиты всей сети выберите глобальный режим и дополнительно проверьте соединение с клиентского устройства.'))])]));
     }
 });
+
+

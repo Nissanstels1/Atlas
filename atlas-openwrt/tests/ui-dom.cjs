@@ -5,7 +5,7 @@ class N {
  appendChild(c){this.children.push(c);return c;}
  replaceChildren(...c){this.children=c;}
  setAttribute(k,v){this.attributes[k]=String(v);if(k==='value')this.value=v;if(['disabled','checked','selected','readonly'].includes(k))this[k]=true;}
- addEventListener(k,v){this.listeners[k]=v;}
+ addEventListener(k,v){const previous=this.listeners[k];this.listeners[k]=previous ? function(event){previous(event);v(event);} : v;}
  get textContent(){return this.data+this.children.map(c=>c.textContent||'').join('');}
  set textContent(s){this.children=[];this.data=s;}
 }
@@ -54,7 +54,7 @@ const all=n=>[n,...n.children.flatMap(all)];
  app.navigate('nodes');const geoButton=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Проверить IP выхода');geoButton.listeners.click({currentTarget:geoButton});await new Promise(r=>setTimeout(r,0));
  assert(calls.some(c=>c.method==='action'&&c.args[0]==='geo_check'&&c.args[1]==='a'.repeat(32)),'Exit country check targeted the wrong node');
  app.deleteDialog(data.subscriptions[0]);assert(modal.textContent.includes('Удалить'),'Delete confirmation');
- app.navigate('routing');const inputs=all(app.root).filter(n=>n.tag==='textarea');inputs[0].value='example.org\nexample.net';
+ app.navigate('routing');const routeDomains=all(app.root).find(n=>n.tag==='textarea'&&(n.attributes.class||'').includes('at-route-domains'));routeDomains.value='example.org\nexample.net';
  const button=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Сохранить правила');button.listeners.click({currentTarget:button});
  await new Promise(r=>setTimeout(r,0));
  const saved=calls.find(c=>c.method==='save_settings');assert(saved.args[0].domains.length===2,'Save rules did not call RPC');
@@ -130,6 +130,26 @@ const all=n=>[n,...n.children.flatMap(all)];
  await app.browserFakeipTest();assert(calls.length===beforeFakeip&&app.root.textContent.includes('Браузер использует маршрут FakeIP')&&app.root.textContent.includes('выходы различаются'),'Browser FakeIP chain test');
  global.fetch=()=>Promise.reject(new Error('Offline'));await app.browserFakeipTest();assert(app.root.textContent.includes('Проверка недоступна'),'Unavailable service must not imply a leak');
  const beforeMonitor=calls.filter(c=>c.method==='monitor').length;
+ // Guided setup preserves existing groups and creates independent site criteria.
+ global.crypto=require('crypto').webcrypto;
+ app.data=data;data.job={};app.data.settings.sections=data.settings.sections||[];
+ const oldGroups=structuredClone(data.settings.sections);
+ function modalControl(cls){return all(modal).find(n=>(n.attributes.class||'').split(' ').includes(cls));}
+ async function press(text){const b=all(modal).find(n=>n.tag==='button'&&n.textContent===text);assert(b&&!b.disabled,'Wizard action unavailable: '+text);await b.listeners.click({currentTarget:b});await new Promise(r=>setTimeout(r,0));}
+ app.setupWizard();assert(!modalControl('at-wizard-sourceURL'),'Existing source must not ask for another URL');
+ await press('Далее');const name=modalControl('at-wizard-name');name.value='Guided YouTube';name.listeners.input();
+ const sites=modalControl('at-wizard-domains');sites.value='youtube.com\ngooglevideo.com';sites.listeners.input();
+ await press('Далее');await press('Далее');assert(!modalControl('at-wizard-profile'),'Auto mode should hide manual selection');
+ const website=modalControl('at-wizard-testURL');website.value='https://www.youtube.com/';website.listeners.input();
+ const marker=modalControl('at-wizard-marker');marker.value='YouTube';marker.listeners.input();
+ await press('Далее');await press('Далее');await press('Сохранить без перезапуска');
+ const guided=calls.filter(c=>c.method==='save_settings').at(-1).args[0];
+ assert(guided.sections[0].site_checks[0].contains==='YouTube'&&guided.sections[0].pool==='a'.repeat(16),'Wizard site criteria/pool lost');
+ assert(guided.group_order&&JSON.stringify(guided.sections.slice(1))===JSON.stringify(oldGroups),'Wizard lost old groups');
+ app.setupWizard();const sourceNone=modalControl('at-wizard-source');sourceNone.value='none';sourceNone.listeners.change();
+ await press('Далее');modalControl('at-wizard-name').value='Direct only';modalControl('at-wizard-name').listeners.input();modalControl('at-wizard-domains').value='example.org';modalControl('at-wizard-domains').listeners.input();
+ await press('Далее');modalControl('at-wizard-policy').value='direct';modalControl('at-wizard-policy').listeners.change();await press('Далее');assert(!modalControl('at-wizard-testURL'),'Direct group should not request site probes');await press('Далее');await press('Далее');await press('Сохранить без перезапуска');
+ assert(calls.filter(c=>c.method==='save_settings').at(-1).args[0].sections[0].pool==='','Direct wizard must not require subscription');
  const pendingMonitor=app.requestMonitor();
  assert(app.requestMonitor()===pendingMonitor,'Concurrent monitor requests must share one promise');
  await pendingMonitor;

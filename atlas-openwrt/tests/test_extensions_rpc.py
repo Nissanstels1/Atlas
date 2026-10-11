@@ -68,6 +68,22 @@ class ExtensionsRPC(unittest.TestCase):
         self.assertEqual(saved['outbound_config'][0]['password'],'graph-secret')
         self.assertEqual(saved['name'],'renamed')
 
+    def test_routing_edit_preserves_cached_list_without_count(self):
+        self.initial['settings']['remote_lists']=[dict(id='c'*16,name='List',url='https://example.org/domains.txt',policy='proxy',format='domains',enabled=True,domains=['one.example','two.example'],cidrs=[])]
+        atlas.atomic(atlas.STATE,self.initial)
+        submitted=atlas.public_status()['settings']
+        # The text editor submits only source fields, never cache metadata.
+        for key in ('domains','cidrs','count','source_cached','srs_cached','updated','error'):
+            submitted['remote_lists'][0].pop(key,None)
+        submitted['sections'][0]['name']='changed'
+        atlas.dispatch('save_settings',{'settings':submitted})
+        saved=atlas.state()['settings']['remote_lists'][0]
+        self.assertEqual(saved['domains'],['one.example','two.example'])
+        self.assertEqual(saved['count'],2)
+        submitted=atlas.public_status()['settings'];submitted['remote_lists'][0]['count']=''
+        atlas.dispatch('save_settings',{'settings':submitted})
+        self.assertEqual(atlas.state()['settings']['remote_lists'][0]['count'],2)
+
     def test_explicit_empty_graph_clears_it(self):
         submitted=atlas.public_status()['settings']
         submitted['sections'][0]['outbound_config']=[]
