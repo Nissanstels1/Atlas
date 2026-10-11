@@ -216,7 +216,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=compact-check-20261011' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=dense-rows-20261011' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -432,14 +432,14 @@ return view.extend({
     nodesPage: function() {
         var self = this, d = self.data, checks = d.checks || {}, measured = (d.runtime || {}).measurements || {};
         var search = node('input', 'at-input at-search', [], { placeholder: 'Поиск сервера или подписки…', value: self.search, 'aria-label': 'Поиск сервера', focus: function() { self.searchFocused = true; }, blur: function() { self.searchFocused = false; } });
-        var container = node('div', 'at-table-wrap');
+        var container = node('div', 'at-table-wrap at-profile-rows');
         function table() {
             var list = d.nodes.filter(function(n) { return (n.name + ' ' + n.subscription).toLowerCase().indexOf(self.search.toLowerCase()) >= 0; });
             container.replaceChildren(node('table', 'at-table', [node('thead', '', node('tr', '', ['Сервер', 'Протокол', 'Страна выхода', 'Подписка', 'HTTPS проверка', 'Выбор'].map(function(t) { return node('th', '', label(t)); }))),
                 node('tbody', '', list.map(function(n) {
                     var c = checks[n.key], live=measured[n.key],fresh=liveMeasurementFresh(live,d.settings.auto_interval_seconds);
                     var measurement=node('div','at-measurement',[node('strong','',label('Автоматический замер')),pill(live ? !fresh ? 'Замер устарел' : live.ok ? live.latency_ms+' мс' : 'Не прошёл' : 'Нет замера',live && fresh ? live.ok ? 'success' : 'danger' : 'neutral'),node('small','',label(live ? liveDate(live.checked_at) : n.eligible === false ? 'Профиль исключён фильтрами' : 'Нет успешного фонового замера: профиль недоступен или отсутствует в активном пуле')),node('small','',label('Ручной HTTPS-тест: '+(!c ? 'не запускался' : c.ok ? c.latency_ms+' мс · '+date(c.checked) : 'не прошёл · '+date(c.checked))),{'title':c && c.error || ''})]);
-                    return node('tr', d.runtime && d.runtime.selected === n.key ? 'selected' : '', [node('td', '', [node('strong', '', label(n.name)), node('small', '', label(n.server + ':' + n.port)), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label(''), d.runtime && d.runtime.selected === n.key ? pill('Используется движком', 'success') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', self.button(d.settings.selected === n.key ? 'Выбран' : 'Выбрать', function() { var s = Object.assign({}, d.settings, { selected: n.key }); return result(api.saveSettings(s)).then(function() { return d.running ? self.action('apply') : self.reload(); }); }, 'small', self.busy() || n.eligible === false || d.settings.selected === n.key))]);
+                    return node('tr', d.runtime && d.runtime.selected === n.key ? 'selected' : '', [node('td', '', [node('strong', '', label(n.name)), node('small', '', label(n.server + ':' + n.port)), node('small','at-profile-meta',label(n.type.toUpperCase()+' · '+(n.country || '—')+' · '+n.subscription)), node('div','at-compact-only',self.button('IP выхода',function(){return self.action('geo_check',n.key);},'small',self.busy())), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label(''), d.runtime && d.runtime.selected === n.key ? pill('Используется движком', 'success') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', self.button(d.settings.selected === n.key ? 'Выбран' : 'Выбрать', function() { var s = Object.assign({}, d.settings, { selected: n.key }); return result(api.saveSettings(s)).then(function() { return d.running ? self.action('apply') : self.reload(); }); }, 'small', self.busy() || n.eligible === false || d.settings.selected === n.key))]);
                 }))]));
             if (!list.length) container.appendChild(self.empty('Серверов нет', d.nodes.length ? 'Попробуйте другой запрос.' : 'Добавьте и обновите подписку.'));
         }
@@ -761,6 +761,15 @@ return view.extend({
         return Promise.resolve();
     },
 
+    listScheduleDialog: function() {
+        var self=this,s=self.data.settings;
+        var hours=node('input','at-input',[],{type:'number',min:1,max:168,value:s.interval_hours});
+        ui.showModal('Обновление пользовательских списков',[node('div','at-modal',[
+            self.field('Проверять обновления каждые, часов',hours,'Сейчас все включённые внешние списки и подписки проверяются каждые '+s.interval_hours+' ч. Меньше число — изменения приходят быстрее, но роутер чаще скачивает данные. Это общее расписание: оно также действует на подписки профилей. Введённые вручную домены скачивать не нужно.'),
+            node('p','at-footnote',label('Можно добавлять несколько списков в каждую секцию: отдельные URL доменов, IP/подсетей, hosts, AdGuard, JSON или SRS. Жёсткого ограничения числа источников нет; фактический объём ограничивают память и место роутера. Ошибка загрузки сохраняет предыдущую рабочую копию.')),
+            node('div','at-actions',[self.button('Отмена',function(){ui.hideModal();},'ghost'),self.button('Сохранить расписание',function(){return result(api.saveSettings(Object.assign({},s,{interval_hours:Number(hours.value)}))).then(function(){ui.hideModal();return self.reload();});},'primary',self.busy())])
+        ])]);
+    },
     routingPage: function() {
         var self = this, d = self.data, s = d.settings;
         var mode = node('select', 'at-input', [atlasElement('option', { value: 'rules', selected: s.mode === 'rules' }, 'По правилам — остальное напрямую'), atlasElement('option', { value: 'global', selected: s.mode === 'global' }, 'Весь трафик — кроме исключений')]);
@@ -870,7 +879,7 @@ return view.extend({
             var count = Number(x.count || 0);
             return node('div', 'at-privacy-row', [pill(x.error ? 'ОШИБКА' : x.updated ? 'ОБНОВЛЁН' : 'ОЖИДАЕТ', x.error ? 'danger' : x.updated ? 'success' : 'neutral'), node('span', '', label(x.name + ' · ' + (x.format === 'srs' ? 'SRS binary' : count + ' правил') + ' · ' + (x.error || (x.updated ? date(x.updated) : 'не загружен'))))]);
         }));
-        return self.routingLayout(node('div', 'at-content', [self.sectionHead('Куда направлять трафик', 'Исключения имеют приоритет. Локальная сеть всегда доступна напрямую.'),
+        return self.routingLayout(node('div', 'at-content', [self.sectionHead('Куда направлять трафик', 'Исключения имеют приоритет. Локальная сеть всегда доступна напрямую.', self.button('Обновление списков: каждые '+s.interval_hours+' ч',function(){self.listScheduleDialog();},'',self.busy())),
             self.plannerCard(),
             node('section','at-card at-padded',[node('h3','',label('Журнал службы')),node('p','at-footnote',label('Последние 200 строк Atlas из системного журнала. Доступны только администратору; могут содержать адреса и сведения о подключениях.')),self.button('Показать журнал',function(){return result(api.serviceLogs()).then(function(r){ui.showModal('Журнал Atlas',[node('pre','',label(r.content||'Записей нет')),node('p','at-footnote',label(r.truncated?'Показана последняя часть журнала.':'')),atlasElement('button',{'class':'btn',click:ui.hideModal},'Закрыть')]);});},'ghost',self.busy())]),
             node('section', 'at-card at-padded', [self.field('Режим маршрутизации', mode),node('label','at-checkbox',[groupOrder,label('Проверять группы по порядку вместе с их списками')])]),
@@ -1010,7 +1019,7 @@ return view.extend({
             node('div', '', (resources.warnings || []).map(function(warning) { return node('div', 'at-notice', label(warning)); })),
             node('p', 'at-footnote', label('Снимок обновляется, пока открыт монитор. Большой кэш сам по себе не доказывает утечку; автоматическая очистка не выполняется, чтобы сохранить действующие FakeIP-сопоставления.')),
             node('section', 'at-card at-padded', [node('h3', '', label('Активные соединения')),
-                connections.length ? node('div', 'at-table-wrap', [node('table', 'at-table', [
+                connections.length ? node('div', 'at-table-wrap at-connection-rows', [node('table', 'at-table', [
                     node('thead', '', [node('tr', '', ['Назначение','Источник','Протокол','Маршрут','Трафик'].map(function(x) { return node('th', '', label(x)); }))]),
                     node('tbody', '', connections.map(function(c) {
                         return node('tr', '', [
