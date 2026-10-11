@@ -949,14 +949,32 @@ class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
 def require_public_https(url, allow_private=False):
     """Reject private/reserved destinations for admin-configured remote lists."""
     parsed = urlsplit(rule_list_url(url, allow_private=allow_private))
+    is_literal=True
     try:
         literal = ipaddress.ip_address(parsed.hostname)
         addresses = [literal]
     except ValueError:
+        is_literal=False
         try:
             addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme=='https' else 80), type=socket.SOCK_STREAM)]
         except (OSError, ValueError) as exc:
             raise AtlasError('Не удалось разрешить публичный адрес списка') from exc
+    if addresses and not is_literal and not allow_private and any(not address.is_global for address in addresses):
+        ranges=[]
+        active=read_json(CONFIG,{})
+        for server in active.get('dns',{}).get('servers',[]):
+            if server.get('type')=='fakeip':
+                for field in ('inet4_range','inet6_range'):
+                    if server.get(field):ranges.append(ipaddress.ip_network(server[field]))
+        # Only configured FakeIP ranges trigger a fresh encrypted public lookup.
+        # Private LAN, loopback, link-local and reserved literals remain denied.
+        if any(address.version==network.version and address in network for address in addresses for network in ranges) and all(address.is_global or any(address.version==network.version and address in network for network in ranges) for address in addresses):
+            try:
+                from public_dns import public_addresses
+                proxy=fetch_rule_proxy_url() if any(x.get('tag')=='list-fetch' for x in active.get('inbounds',[])) else None
+                addresses=public_addresses(parsed.hostname,proxy)
+            except (ValueError,OSError,http.client.HTTPException) as exc:
+                raise AtlasError('Не удалось проверить публичный адрес за FakeIP') from exc
     if not addresses or (not allow_private and any(not address.is_global for address in addresses)):
         raise AtlasError('Список правил должен находиться на публичном HTTPS сервере')
     return url
@@ -1303,10 +1321,12 @@ def apply(current, enable=False):
         raise
 
 
-def refresh(current, sub_id=''):
+def refresh(current, sub_id='', lists_only=False):
     found = False
     successes, failures, list_successes = 0, [], 0
     for sub in current['subscriptions']:
+        if lists_only:
+            continue
         if sub_id and sub['id'] != sub_id:
             continue
         if not sub.get('enabled', True):
@@ -1388,7 +1408,7 @@ def refresh(current, sub_id=''):
             return 'Локальные профили не требуют сетевого обновления'
         raise AtlasError('Нет включённых подписок или списков правил для обновления')
     atomic(STATE, current)
-    if (successes or list_successes) and service_running():
+    if (successes or list_successes) and not lists_only and service_running():
         apply(current)
     maintain_artifacts(current)
     if failures:
@@ -2236,9 +2256,11 @@ def dispatch(method, args):
             return {'ok': True}
         elif method == 'action':
             operation = args.get('operation')
-            if operation not in ('refresh', 'apply', 'start', 'stop', 'probe', 'privacy', 'selftest', 'geo_check', 'section_test'):
+            if operation not in ('refresh', 'refresh_lists', 'apply', 'start', 'stop', 'probe', 'privacy', 'selftest', 'geo_check', 'section_test'):
                 raise AtlasError('Неизвестная операция')
             sub_id = args.get('id', '')
+            if operation == 'refresh_lists' and sub_id:
+                raise AtlasError('Обновление списков не принимает идентификатор подписки')
             if operation == 'section_test':
                 if not service_running() or not any(x['id'] == sub_id and x['enabled'] for x in current['settings']['sections']):
                     raise AtlasError('Для проверки выберите включённую секцию работающего Atlas')
@@ -2279,6 +2301,8 @@ def worker(job_id):
                 message = 'Замеры секции: доступны %d из %d' % (sum(isinstance(x,dict) and x.get('delay',0)>0 for x in results.values()),len(results))
             elif op == 'refresh':
                 message = refresh(current, job['subscription'])
+            elif op == 'refresh_lists':
+                message = refresh(current, lists_only=True)
             elif op in ('apply', 'start'):
                 apply(current, enable=op == 'start')
                 message = 'Конфигурация проверена, сервис запущен'

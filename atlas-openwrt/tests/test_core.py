@@ -515,6 +515,16 @@ class Persistence(unittest.TestCase):
             with self.assertRaises(core.AtlasError): atlas.refresh(s)
         self.assertEqual(atlas.state()['settings']['remote_lists'][0]['domains'],['old.example'])
 
+    def test_list_only_refresh_preserves_subscriptions_without_fetching_them(self):
+        s=atlas.state();subscriptions=copy.deepcopy(s['subscriptions'])
+        s['settings']['remote_lists']=[{'name':'ads','url':'https://lists.example.org/list.txt','policy':'dnsblock','format':'domains','enabled':True,'domains':['old.example'],'cidrs':[]}]
+        with mock.patch.object(atlas,'fetch') as subscription_fetch, mock.patch.object(atlas,'fetch_rule_list',return_value=(['new.example'],[])), mock.patch.object(atlas,'apply') as implicit_apply, mock.patch.object(atlas,'service_running',return_value=True):
+            atlas.refresh(s,lists_only=True)
+        subscription_fetch.assert_not_called()
+        implicit_apply.assert_not_called()
+        self.assertEqual(atlas.state()['subscriptions'],subscriptions)
+        self.assertEqual(atlas.state()['settings']['remote_lists'][0]['domains'],['new.example'])
+
     def test_refresh_failure_preserves_nodes(self):
         old=atlas.state()
         with mock.patch.object(atlas,'fetch',side_effect=core.AtlasError('HTTP 500')):

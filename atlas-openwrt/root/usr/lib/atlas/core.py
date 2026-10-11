@@ -1894,6 +1894,9 @@ def privacy_checks(settings, config, running=False):
     route = config.get('route', {})
     route_rules = route.get('rules', [])
     secure = next((item for item in servers if item.get('tag') == 'secure'), {})
+    dns_filter_active=secure.get('tls',{}).get('server_name')=='dns.adguard-dns.com' or any(x.get('action')=='reject' and (x.get('domain_suffix') or x.get('rule_set')) for x in rules)
+    from security import uniform_proxy_expected
+    covered=uniform_proxy_expected(settings,config)
     resolve_requested=settings['resolve_real_ip'] or any(x['enabled'] and x.get('resolve_real_ip') is True for x in settings['sections'])
     checks = [
         {'id': 'running', 'ok': bool(running), 'label': 'Маршрутизатор Atlas запущен' if running else 'Atlas сейчас остановлен'},
@@ -1906,12 +1909,12 @@ def privacy_checks(settings, config, running=False):
         {'id': 'bootstrap_dns', 'ok': any(item.get('tag') == 'bootstrap' and item.get('type') in ('https','tls') and item.get('tls', {}).get('enabled') for item in servers), 'label': 'Bootstrap запросы для адресов прокси тоже используют TLS'},
         {'id': 'no_ecs', 'ok': 'client_subnet' not in dns and all('client_subnet' not in item for item in rules), 'label': 'IP-подсеть клиента не добавляется в DNS-запросы'},
         {'id': 'strict_route', 'ok': bool(inbound.get('strict_route') and inbound.get('auto_redirect')), 'label': 'Включены строгая маршрутизация и перехват TUN'},
-        {'id': 'adblock', 'ok': settings['dns_filter'] == 'adguard' or bool(settings['blocked_domains']), 'label': 'DNS-блокировка рекламы и трекеров включена' if settings['dns_filter'] == 'adguard' or settings['blocked_domains'] else 'DNS-блокировка рекламы выключена'},
+        {'id': 'adblock', 'ok': dns_filter_active, 'label': 'DNS-фильтр или блокирующие списки активны' if dns_filter_active else 'DNS-блокировка рекламы выключена'},
         {'id': 'encrypted_dns_bypass', 'ok': settings['block_known_doh'], 'label': 'Известные публичные DoH хосты блокируются для снижения обхода DNS-фильтров' if settings['block_known_doh'] else 'Клиентские приложения могут использовать собственный DoH'},
         {'id': 'fakeip', 'ok': any(item.get('type') == 'fakeip' for item in servers) and any(item.get('server') == 'fakeip' and item.get('action') == 'route' for item in rules), 'label': 'FakeIP настроен для маршрута через прокси' if any(item.get('type') == 'fakeip' for item in servers) and any(item.get('server') == 'fakeip' and item.get('action') == 'route' for item in rules) else 'FakeIP выключен или нет доменов через прокси'},
         {'id': 'fakeip_persistence', 'ok': bool(config.get('experimental', {}).get('cache_file', {}).get('enabled') and config.get('experimental', {}).get('cache_file', {}).get('store_fakeip')), 'label': 'Кеш FakeIP сохраняется между перезапусками sing-box'},
         {'id': 'fakeip_ttl', 'ok': not settings['fakeip'] or any(x.get('server') == 'fakeip' and x.get('rewrite_ttl') == settings['fakeip_ttl_seconds'] for x in rules), 'label': 'TTL FakeIP ограничивает время хранения поддельных адресов клиентами'},
         {'id': 'real_ip_resolution', 'ok': not resolve_requested or real_ip_resolution_active(config), 'label': 'Маршрутизируемые домены разрешаются через выбранный защищённый DNS' if resolve_requested else 'Повторное разрешение реальных IP выключено'},
-        {'id': 'coverage', 'ok': settings['mode'] == 'global', 'label': 'Весь внешний трафик настроен через прокси' if settings['mode'] == 'global' else 'Часть трафика идёт напрямую по режиму «По правилам»'},
+        {'id': 'coverage', 'ok': covered, 'label': 'Внешний трафик направлен через общий прокси без явных прямых исключений' if covered else 'Есть прямые маршруты, исключения или режим групп: защита всех сайтов не подтверждена'},
     ]
     return {'checks': checks, 'notice': 'Аудит конфигурации — не проверка с устройства в интернете. Bootstrap DoH идёт напрямую к Cloudflare и раскрывает этому DNS-провайдеру запросы для адресов серверов; клиентский DoH, ECH, VPN-приложение или остановка роутера могут обходить правила.'}

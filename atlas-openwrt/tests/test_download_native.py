@@ -60,6 +60,9 @@ class NativeDownload(unittest.TestCase):
                 with mock.patch.object(engine_features,'capabilities',return_value=engine_features.capabilities(binary)):
                     cfg=core.make_config(current,api_secret='a'*64)
                 cfg['inbounds']=[];cfg['route'].update(final='proxy',rules=[])
+                # The user's active Atlas owns 127.0.0.1:19090; diagnostics use
+                # another loopback address without interrupting that service.
+                cfg['experimental']['clash_api']['external_controller']='127.0.0.43:19090'
                 cfg['certificate']={'certificate_path':[str(cert)]}
                 cfg['experimental']['cache_file']['path']=str(root/'cache.db')
                 path=root/'config.json';path.write_text(json.dumps(cfg))

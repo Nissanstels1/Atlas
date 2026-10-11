@@ -162,6 +162,7 @@ return view.extend({
         return self.monitorRequest;
     },
     navigate: function(tab) {
+        if (tab !== this.tab) this.sectionDashboardPanel = null;
         this.tab = tab;
         if (tab === 'monitor' && !this.readonly) {
             var self = this;
@@ -198,6 +199,13 @@ return view.extend({
         self.root.replaceChildren(sidebar, content);
     },
     sectionDashboard: function() {
+        // Status polling redraws the overview. Keep its expanded section panel
+        // and unsaved server selection until the user leaves this page.
+        if (this.sectionDashboardPanel) {
+            var disabled=this.busy() || this.readonly;
+            this.sectionDashboardPanel.querySelectorAll('button').forEach(function(button){button.disabled=disabled;});
+            return this.sectionDashboardPanel;
+        }
         var self = this, panel = node('section', 'at-card at-padded', []);
         function load() { return result(api.sectionDashboard()).then(function(r) {
             panel.replaceChildren(node('h3', '', label('Серверы секций')), self.button('Обновить секции', load, 'ghost', self.busy()));
@@ -217,6 +225,7 @@ return view.extend({
         }); }
         panel.appendChild(node('h3','',label('Серверы секций')));
         panel.appendChild(self.button('Показать секции и серверы', load, 'ghost', self.busy()));
+        self.sectionDashboardPanel = panel;
         return panel;
     },
     overviewPage: function() {
@@ -527,6 +536,7 @@ return view.extend({
         stun.addEventListener('change',function(){self.securityStun=stun.checked;});
         var names={ipv4:'Выход IPv4',ipv6:'Выход IPv6',webrtc:'WebRTC',dns:'Внешняя утечка DNS'},states={match:'Совпадает',leak:'Утечка подтверждена',direct:'Прямой маршрут',different:'Другой выход',unknown:'Не подтверждено',unchecked:'Не проверено'};
         return node('section','at-card at-padded at-security-card',[node('h3','',label('Проверка безопасности с этого устройства')),node('p','at-footnote',label('Сначала измерьте общий прокси и прямой выход роутера, затем сравните с браузером. Разные группы могут использовать разные выходы. Прямой маршрут в режиме групп не считается автоматическим доказательством утечки.')),
+            node('div','at-actions',[self.button('Рекомендации и настройка защиты',function(){self.securityRecommendations();},'ghost',self.busy()),self.button('Блокировка рекламы',function(){self.adblockDialog();},'ghost',self.busy())]),
             node('div','at-security-steps',[self.button('1. Измерить выходы роутера',function(){return self.action('privacy');},'ghost',self.busy() || !self.data.nodes.length),self.button('2. Проверить браузер и сравнить',function(){return self.clientPrivacyTest({compare:true,stun:!!self.securityStun});},'primary',self.busy())]),
             node('label','at-checkbox',[stun,label('Дополнительно проверить WebRTC через внешний STUN')]),node('p','at-footnote',label('По нажатию IP-сервисы api.ipify.org и api6.ipify.org увидят ваш выходной адрес. При включённом STUN запрос получает stun.l.google.com. Камера и микрофон не используются. Адреса браузера передаются вашему роутеру для сравнения, но не записываются в журнал или состояние. Измеренные выходы сохраняются только как отпечатки на время работы Atlas.')),
             node('div','at-privacy-list',(report.checks || []).map(function(c){return node('div','at-security-result',[pill(states[c.state] || c.state,c.state==='leak' ? 'danger' : c.state==='match' ? 'success' : 'neutral'),node('div','',[node('strong','',label(names[c.id] || c.id)),node('p','at-footnote',label(c.message))])]);})),
@@ -536,6 +546,35 @@ return view.extend({
     browserFingerprintDialog: function() {
         var items=['Языки: '+(navigator.languages || [navigator.language]).join(', '),'Платформа: '+navigator.platform,'Часовой пояс: '+Intl.DateTimeFormat().resolvedOptions().timeZone,'Размер экрана: '+screen.width+' × '+screen.height,'Cookies: '+(navigator.cookieEnabled ? 'разрешены' : 'выключены')];
         ui.showModal('Признаки, доступные сайтам',[node('p','at-footnote',label('Эти сведения считываются локально и не отправляются внешнему сервису. Это примеры признаков отпечатка, а не оценка уникальности вашего браузера.')),node('div','',items.map(function(t){return node('p','',label(t));})),atlasElement('button',{'class':'btn',click:ui.hideModal},'Закрыть')]);
+    },
+
+    securityRecommendations: function() {
+        var self=this,s=self.data.settings,msg=node('p','at-inline-error');
+        var choices=[
+            {key:'dhcp_dns_enabled',title:'Направлять DNS устройств через Atlas',hint:'Устройства, использующие DNS роутера, получат его защищённый DNS. Собственный DoH браузера проверяется отдельно.',checked:s.dhcp_dns_enabled!==false},
+            {key:'block_known_doh',title:'Блокировать известные обходные DoH-сервисы',hint:'Снижает обход DNS-фильтра. Может нарушить работу браузера с принудительным защищённым DNS. Не блокирует все возможные DoH адреса.',checked:!!s.block_known_doh},
+            {key:'kill_switch',title:'Блокировать защищаемый трафик при отказе Atlas',hint:'При сбое туннеля защищаемые устройства могут остаться без интернета. Сначала проверьте прокси; сохраните локальный доступ к роутеру.',checked:!!s.kill_switch}
+        ];
+        choices.forEach(function(x){x.input=node('input','at-security-fix-'+x.key,[],{type:'checkbox',checked:x.checked});});
+        var global=node('input','at-security-fix-global',[],{type:'checkbox',checked:s.mode==='global'});
+        var checks=(self.data.privacy || {}).checks || [];
+        ui.showModal('Где защита ограничена и что изменить',[node('div','at-modal',[
+            node('div','at-privacy-list',checks.filter(function(x){return !x.ok;}).map(function(x){return node('p','at-footnote',label('Проверить: '+x.label));})),
+            node('label','at-checkbox',[global,label('Весь внешний трафик через общий прокси')]),node('p','at-footnote',label('В режиме групп другие сайты идут напрямую. Глобальный режим меняет основной маршрут, но сохраняет явные прямые группы и исключения: удалите ненужные исключения в маршрутизации после проверки.')),
+            choices.map(function(x){return node('div','',[node('label','at-checkbox',[x.input,label(x.title)]),node('p','at-footnote',label(x.hint))]);}),
+            node('p','at-footnote',label('Atlas не может исправить вход в аккаунты, cookies, отпечаток браузера или настройки расширений. FlClash меняет выход этого компьютера: отдельно проверяйте устройство, которое использует только роутер. Сначала сохраните рекомендации, затем проверьте конфигурацию и примените в обзоре.')),
+            msg]),node('div','right',[self.button('Сохранить рекомендации',function(){var settings=Object.assign({},s,{mode:global.checked ? 'global' : 'rules'});choices.forEach(function(x){settings[x.key]=x.input.checked;});return result(api.saveSettings(settings)).then(function(){ui.hideModal();return self.reload();}).catch(function(e){msg.textContent=e.message;});},'primary'),self.button('Отмена',function(){ui.hideModal();},'ghost')])]);
+    },
+
+    adblockDialog: function() {
+        var self=this,s=self.data.settings,msg=node('p','at-inline-error');
+        var presets=[{name:'Peter Lowe — лёгкий список',url:'https://pgl.yoyo.org/as/serverlist.php?hostformat=nohtml&showintro=0',format:'domains'},
+            {name:'HaGeZi Light — реклама и трекеры',url:'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/light.txt',format:'adguard'}];
+        presets.forEach(function(x){x.input=node('input','at-adblock-preset',[],{type:'checkbox',checked:(s.remote_lists || []).some(function(y){return y.url===x.url && y.policy==='dnsblock' && y.enabled!==false;})});});
+        var dns=node('select','at-adblock-dns',[atlasElement('option',{value:'keep'},'Сохранить текущий DNS'),atlasElement('option',{value:'adguard'},'AdGuard DNS — фильтрация рекламы'),atlasElement('option',{value:'cloudflare'},'Cloudflare DNS — без рекламного фильтра')]);
+        var saving=false;function save(apply){if(saving)return Promise.resolve();saving=true;msg.textContent='Сохранение настроек…';var lists=(s.remote_lists || []).map(function(x){return Object.assign({},x);});presets.forEach(function(x){var found=lists.find(function(y){return y.url===x.url && y.policy==='dnsblock';});if(found)found.enabled=x.input.checked;else if(x.input.checked)lists.push({name:x.name,url:x.url,format:x.format,policy:'dnsblock',enabled:true,section:''});});var settings=Object.assign({},s,{remote_lists:lists});if(dns.value!=='keep')settings.dns_filter=dns.value;return result(api.saveSettings(settings)).then(function(){if(!apply){ui.hideModal();return self.reload();}return (lists.some(function(x){return x.enabled!==false;}) ? result(api.action('refresh_lists','')).then(function(){return self.wizardWait();}) : Promise.resolve()).then(function(){return result(api.action('apply',''));}).then(function(){return self.wizardWait();}).then(function(){ui.hideModal();return self.reload();});}).catch(function(e){msg.textContent=e.message;}).finally(function(){saving=false;});}
+        ui.showModal('Блокировка рекламы и трекеров',[node('div','at-modal',[node('p','at-footnote',label('DNS-фильтрация действует для устройств, использующих Atlas. Она блокирует рекламные домены, но не удаляет элементы страницы и не гарантирует блокировку рекламы YouTube. Adblock Plus и другие расширения устанавливаются отдельно в браузере.')),
+            presets.map(function(x){return node('label','at-checkbox',[x.input,label(x.name)]);}),self.field('DNS-провайдер',dns),node('p','at-footnote',label('Снимите отметку, чтобы выключить соответствующий список. Остальные списки сохранятся. При включении Atlas скачает списки и применит правила. Фильтр может блокировать нужные сайты: добавьте домен в глобальные исключения. Списки обновляются по общему расписанию.')),msg]),node('div','right',[self.button('Сохранить без применения',function(){return save(false);},'ghost'),self.button('Сохранить и включить',function(){return save(true);},'primary'),self.button('Отмена',function(){ui.hideModal();},'ghost')])]);
     },
 
     sectionDialog: function(section, commit) {

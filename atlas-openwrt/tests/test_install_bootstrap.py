@@ -48,6 +48,11 @@ class BootstrapTests(unittest.TestCase):
                 target.write_text('#!/bin/sh\n' + body + '\n')
                 target.chmod(0o755)
             source = (ROOT / 'install.sh').read_text()
+            # OpenWrt itself has opkg/apk in /bin. Select only our fixture manager,
+            # so an APK case on an opkg router cannot invoke its real manager.
+            for command in ('opkg', 'apk'):
+                source = source.replace('command -v '+command+' >/dev/null 2>&1',
+                                        '[ -x "'+shell_path(binaries / command)+'" ]')
             source = source.replace('63bc588105e12aff89e9dff8713cc112a7130a7bb02517b593e90cde58e63497', hashlib.sha256(installer.read_bytes()).hexdigest())
             for original, target in [('/etc/openwrt_release', release), ('/usr/bin/python3', python), ('/usr/libexec/rpcd/atlas', backend)]:
                 source = source.replace(original, shell_path(target))

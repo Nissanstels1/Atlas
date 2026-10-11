@@ -6,6 +6,7 @@ class N {
  replaceChildren(...c){this.children=c;}
  setAttribute(k,v){this.attributes[k]=String(v);if(k==='value')this.value=v;if(['disabled','checked','selected','readonly'].includes(k))this[k]=true;}
  addEventListener(k,v){const previous=this.listeners[k];this.listeners[k]=previous ? function(event){previous(event);v(event);} : v;}
+ querySelectorAll(tag){return this.children.flatMap(c=>[...(c.tag===tag ? [c] : []),...c.querySelectorAll(tag)]);}
  get textContent(){return this.data+this.children.map(c=>c.textContent||'').join('');}
  set textContent(s){this.children=[];this.data=s;}
 }
@@ -17,7 +18,8 @@ const calls=[];let data=structuredClone(initial),modal=null;
 const rpc={declare:({method})=>(...args)=>{calls.push({method,args});if(method==='status')return Promise.resolve(structuredClone(data));if(method==='monitor')return Promise.resolve({ok:true,available:true,connections:[],rules:[],memory:{},upload_total:0,download_total:0});if(method==='save_settings')data.settings=args[0];if(method==='import_rules')return Promise.resolve({ok:true,domains:2,cidrs:1});if(method==='import_subscriptions')return Promise.resolve({ok:true,added:1,duplicates:1,errors:0,items:[{line:1,name:'provider.example',status:'added'},{line:2,name:'provider.example',status:'duplicate'}]});return Promise.resolve({ok:true});}};
 const ui={addNotification(){},showModal(t,c){modal=E('div',{},c)},hideModal(){modal=null}};
 const L={hasViewPermission:()=>true,resource:s=>s};
-const app=new Function('view','rpc','poll','ui','L','E',fs.readFileSync(path.join(__dirname,'../root/www/luci-static/resources/view/atlas/overview.js'),'utf8'))({extend:x=>x},rpc,{add(){}},ui,L,E);
+let pollCallback;
+const app=new Function('view','rpc','poll','ui','L','E',fs.readFileSync(path.join(__dirname,'../root/www/luci-static/resources/view/atlas/overview.js'),'utf8'))({extend:x=>x},rpc,{add(f){pollCallback=f;}},ui,L,E);
 const assert=(v,m)=>{if(!v)throw Error(m)};
 const all=n=>[n,...n.children.flatMap(all)];
 (async()=>{
@@ -25,7 +27,16 @@ const all=n=>[n,...n.children.flatMap(all)];
  assert(app.root.textContent.includes('Начните с подписки'),'Empty state missing');
  assert(all(app.root).find(n=>n.tag==='button'&&n.textContent==='Запустить Atlas').disabled===true,'Empty setup must block routing start');
  assert(!all(app.root).find(n=>n.tag==='button'&&n.textContent==='Добавить подписку').disabled,'Add subscription must remain enabled with zero servers');
+ const sectionsPanel=app.sectionDashboard();
+ const showSections=all(sectionsPanel).find(n=>n.tag==='button'&&n.textContent==='Показать секции и серверы');
+ showSections.listeners.click({currentTarget:showSections});await new Promise(r=>setTimeout(r,0));
+ await pollCallback();
+ assert(app.sectionDashboard()===sectionsPanel,'Status polling replaced expanded section dashboard');
+ assert(all(app.root).includes(sectionsPanel)&&sectionsPanel.textContent.includes('Обновить секции'),'Expanded section dashboard disappeared during polling');
+ app.data.job={status:'running'};app.draw();assert(sectionsPanel.querySelectorAll('button').every(x=>x.disabled),'Cached section controls ignored busy job');
+ app.data.job={};app.draw();assert(sectionsPanel.querySelectorAll('button').every(x=>!x.disabled),'Cached section controls remained disabled after job');
  app.navigate('subscriptions');
+ assert(app.sectionDashboardPanel===null,'Section dashboard retained after leaving overview');
  assert(!all(app.root).find(n=>n.tag==='button'&&n.textContent==='+ Подписка').disabled,'Subscription button blocked by false HTML attribute');
  app.readonly=true;app.draw();
  assert(all(app.root).find(n=>n.tag==='button'&&n.textContent==='+ Подписка').disabled===true,'Read-only permissions must still block changes');
@@ -150,6 +161,27 @@ const all=n=>[n,...n.children.flatMap(all)];
  await press('Далее');modalControl('at-wizard-name').value='Direct only';modalControl('at-wizard-name').listeners.input();modalControl('at-wizard-domains').value='example.org';modalControl('at-wizard-domains').listeners.input();
  await press('Далее');modalControl('at-wizard-policy').value='direct';modalControl('at-wizard-policy').listeners.change();await press('Далее');assert(!modalControl('at-wizard-testURL'),'Direct group should not request site probes');await press('Далее');await press('Далее');await press('Сохранить без перезапуска');
  assert(calls.filter(c=>c.method==='save_settings').at(-1).args[0].sections[0].pool==='','Direct wizard must not require subscription');
+ app.navigate('privacy');const retainedSettings=structuredClone(data.settings);
+ app.adblockDialog();const adCheckbox=all(modal).find(n=>n.attributes.class==='at-adblock-preset');adCheckbox.checked=true;
+ await press('Сохранить без применения');
+ let presetList=data.settings.remote_lists.find(x=>x.url.includes('pgl.yoyo.org'));
+ assert(presetList&&presetList.enabled&&presetList.policy==='dnsblock','Ad blocking preset was not saved');
+ assert(data.settings.sections.length===retainedSettings.sections.length,'Ad blocking changed site groups');
+ app.adblockDialog();all(modal).find(n=>n.attributes.class==='at-adblock-preset').checked=false;await press('Сохранить без применения');
+ assert(data.settings.remote_lists.filter(x=>x.url.includes('pgl.yoyo.org')).length===1&&!data.settings.remote_lists.find(x=>x.url.includes('pgl.yoyo.org')).enabled,'Ad blocking toggle duplicated or failed to disable list');
+ app.adblockDialog();all(modal).find(n=>n.attributes.class==='at-adblock-preset').checked=true;
+ const enableAds=all(modal).find(n=>n.tag==='button'&&n.textContent==='Сохранить и включить');
+ const beforeEnableAds=calls.length;
+ enableAds.listeners.click({currentTarget:enableAds});enableAds.listeners.click({currentTarget:enableAds});
+ await new Promise(r=>setTimeout(r,0));
+ const adActions=calls.slice(beforeEnableAds).filter(c=>c.method==='action').map(c=>c.args[0]);
+ assert(JSON.stringify(adActions)===JSON.stringify(['refresh_lists','apply']),'Ad filter must refresh only lists and apply once, even on double click');
+ assert(calls.slice(beforeEnableAds).filter(c=>c.method==='save_settings').length===1,'Double click repeated ad filter save');
+ assert(modal===null,'Ad filter modal did not finish after confirmed apply');
+ app.securityRecommendations();modalControl('at-security-fix-global').checked=true;
+ modalControl('at-security-fix-kill_switch').checked=true;await press('Сохранить рекомендации');
+ assert(data.settings.mode==='global'&&data.settings.kill_switch,'Security recommendations were not saved');
+ assert(data.settings.sections.length===retainedSettings.sections.length,'Security recommendations removed groups');
  const pendingMonitor=app.requestMonitor();
  assert(app.requestMonitor()===pendingMonitor,'Concurrent monitor requests must share one promise');
  await pendingMonitor;

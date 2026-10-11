@@ -18,6 +18,28 @@ def state():
 
 
 class PrivacyFeatures(unittest.TestCase):
+    def test_ad_filter_audit_uses_active_config_not_unsaved_settings(self):
+        s = state()
+        active = core.make_config(s)
+        s['settings']['dns_filter'] = 'adguard'
+        checks = {x['id']: x['ok'] for x in core.privacy_checks(s['settings'], active)['checks']}
+        self.assertFalse(checks['adblock'])
+
+    def test_active_dns_block_list_is_recognized_as_filter(self):
+        s = state()
+        s['settings']['remote_lists'] = [{'name': 'Ads', 'url': 'https://example.org/ads.txt',
+            'policy': 'dnsblock', 'format': 'domains', 'enabled': True,
+            'domains': ['ads.example'], 'cidrs': []}]
+        checks = {x['id']: x['ok'] for x in core.privacy_checks(s['settings'], core.make_config(s))['checks']}
+        self.assertTrue(checks['adblock'])
+
+    def test_global_mode_with_direct_group_is_not_full_proxy_coverage(self):
+        s = state()
+        s['settings'].update(mode='global', sections=[{'name': 'Direct', 'policy': 'direct',
+            'enabled': True, 'domains': ['example.org'], 'cidrs': [], 'source_ips': []}])
+        checks = {x['id']: x['ok'] for x in core.privacy_checks(s['settings'], core.make_config(s))['checks']}
+        self.assertFalse(checks['coverage'])
+
     def test_default_secure_dns_without_fakeip_or_ad_filter(self):
         c = core.make_config(state())
         secure = next(x for x in c['dns']['servers'] if x['tag'] == 'secure')
