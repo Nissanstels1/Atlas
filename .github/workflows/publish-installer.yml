@@ -2,12 +2,12 @@ name: Publish Atlas installer and ARM64 packages
 on:
   push:
     branches: [main]
-    paths: ['releases/atlas-0.28.3/**', '.github/workflows/publish-installer.yml']
+    paths: ['releases/atlas-0.29.0/**', '.github/workflows/publish-installer.yml']
   workflow_dispatch:
 permissions:
   contents: write
 concurrency:
-  group: atlas-0283-release
+  group: atlas-0290-release
   cancel-in-progress: false
 jobs:
   publish:
@@ -18,7 +18,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import hashlib,json,pathlib,re,zipfile,io,urllib.request
-          root=pathlib.Path('releases/atlas-0.28.3');meta=json.loads((root/'manifest.json').read_text())
+          root=pathlib.Path('releases/atlas-0.29.0');meta=json.loads((root/'manifest.json').read_text())
           out=pathlib.Path('publish');out.mkdir()
           chunks=[]
           for part in meta['parts']:
@@ -37,10 +37,10 @@ jobs:
               assert hashlib.sha256((out/name).read_bytes()).hexdigest()==expected
           for name,expected in meta['reuse'].items():
               assert re.fullmatch(r'[A-Za-z0-9_.+-]+',name)
-              data=urllib.request.urlopen('https://github.com/Nissanstels1/Atlas/releases/download/v0.28.0-beta/'+name,timeout=120).read()
+              data=urllib.request.urlopen('https://github.com/Nissanstels1/Atlas/releases/download/v0.28.3-beta/'+name,timeout=120).read()
               assert hashlib.sha256(data).hexdigest()==expected
               (out/name).write_bytes(data)
-          with zipfile.ZipFile(out/'atlas-openwrt-0.28.3-beta.zip') as z:
+          with zipfile.ZipFile(out/'atlas-openwrt-0.29.0-beta.zip') as z:
               for entry in z.infolist():
                   path=pathlib.PurePosixPath(entry.filename)
                   assert path.parts[0]=='atlas-openwrt' and '..' not in path.parts
@@ -58,7 +58,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add atlas-openwrt
           if ! git diff --cached --quiet; then
-            git commit -m 'Publish Atlas 0.28.3 source and installer'
+            git commit -m 'Publish Atlas 0.29.0 source and installer'
             git push origin HEAD:main
           fi
           echo "ATLAS_RELEASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
@@ -66,10 +66,10 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const fs=require('fs'),tag='v0.28.3-beta';
+            const fs=require('fs'),tag='v0.29.0-beta';
             let release;
             try { release=(await github.rest.repos.getReleaseByTag({...context.repo,tag})).data; }
-            catch(e) { if(e.status!==404)throw e;release=(await github.rest.repos.createRelease({...context.repo,tag_name:tag,target_commitish:process.env.ATLAS_RELEASE_COMMIT,name:'Atlas 0.28.3 · установка одной командой · ARM64/x86_64',prerelease:true,body:fs.readFileSync('publish/Atlas-0.28.3-report.md','utf8')})).data; }
+            catch(e) { if(e.status!==404)throw e;release=(await github.rest.repos.createRelease({...context.repo,tag_name:tag,target_commitish:process.env.ATLAS_RELEASE_COMMIT,name:'Atlas 0.29.0 · группы сайтов · пошаговый мастер',prerelease:true,body:fs.readFileSync('publish/Atlas-0.29.0-report.md','utf8')})).data; }
             const old=(await github.rest.repos.listReleaseAssets({...context.repo,release_id:release.id,per_page:100})).data;
             for(const name of fs.readdirSync('publish')) {
               const match=old.find(x=>x.name===name);if(match)await github.rest.repos.deleteReleaseAsset({...context.repo,asset_id:match.id});

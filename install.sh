@@ -5,7 +5,7 @@ case "$(uname -m)" in x86_64|aarch64) ;; *) echo 'Automatic full installation cu
 umask 077
 directory=$(mktemp -d /tmp/atlas-bootstrap.XXXXXX)
 trap 'rm -rf "$directory"' EXIT HUP INT TERM
-base=https://github.com/Nissanstels1/Atlas/releases/download/v0.28.3-beta
+base=https://github.com/Nissanstels1/Atlas/releases/download/v0.29.0-beta
 wget -q -O "$directory/install-release.sh" "$base/install-release.sh"
 actual=$(sha256sum "$directory/install-release.sh" | awk '{print $1}')
 [ "$actual" = '63bc588105e12aff89e9dff8713cc112a7130a7bb02517b593e90cde58e63497' ] || { echo 'Installer checksum mismatch. Nothing installed.'; exit 1; }
