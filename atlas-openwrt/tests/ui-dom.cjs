@@ -45,6 +45,13 @@ const all=n=>[n,...n.children.flatMap(all)];
  data.subscriptions=[{id:'a'.repeat(16),name:'<img src=x onerror=alert(1)>',host:'example.com',count:1,enabled:true,metadata:{}}];
  data.nodes=[{key:'a'.repeat(32),name:'Node',subscription:'Test',type:'vless',server:'example.com',port:443}];
  app.data=data;
+ let sectionSaved=null,listsSaved=null;
+ const sampleSection={id:'b'.repeat(16),name:'Видео',policy:'proxy',domains:['youtube.com']};
+ app.sectionDialog(sampleSection,v=>sectionSaved=v,{get:()=>[{id:'c'.repeat(16),section:sampleSection.id,name:'External',url:'https://example.org/domains.txt',format:'domains',policy:'proxy',enabled:true}],set:(id,items)=>listsSaved={id,items}});
+ assert(modal.textContent.includes('1. Подключение и профили')&&modal.textContent.includes('Списки этой секции'),'Unified section editor missing');
+ assert(modal.textContent.includes('Исключения только из этой секции'),'Section exclusions disappeared');
+ const sectionButton=all(modal).find(n=>n.tag==='button'&&n.textContent==='Добавить в форму');await sectionButton.listeners.click({currentTarget:sectionButton});
+ assert(sectionSaved.name==='Видео'&&listsSaved.id===sampleSection.id&&listsSaved.items[0].url==='https://example.org/domains.txt','Section-owned lists lost during editing');
  for(const t of ['overview','subscriptions','nodes','routing','privacy','monitor','settings'])app.navigate(t);
  app.navigate('subscriptions');assert(!all(app.root).some(n=>n.tag==='img'),'HTML injection');
  app.subscriptionDialog();assert(modal.textContent.includes('Ссылка подписки'),'Add modal');assert(modal.textContent.includes('HTTP-заголовки провайдера'),'Provider header input missing');
@@ -140,7 +147,7 @@ const all=n=>[n,...n.children.flatMap(all)];
  const beforeFakeip=calls.length;global.fetch=(url,options)=>{assert(options.credentials==='omit'&&options.referrerPolicy==='no-referrer');return Promise.resolve({ok:true,text:()=>Promise.resolve(JSON.stringify({fakeip:true,IP:url.includes('fakeip.')?'203.0.113.1':'198.51.100.2'}))})};
  await app.browserFakeipTest();assert(calls.length===beforeFakeip&&app.root.textContent.includes('Браузер использует маршрут FakeIP')&&app.root.textContent.includes('выходы различаются'),'Browser FakeIP chain test');
  global.fetch=()=>Promise.reject(new Error('Offline'));await app.browserFakeipTest();assert(app.root.textContent.includes('Проверка недоступна'),'Unavailable service must not imply a leak');
- const beforeMonitor=calls.filter(c=>c.method==='monitor').length;
+
  // Guided setup preserves existing groups and creates independent site criteria.
  global.crypto=require('crypto').webcrypto;
  app.data=data;data.job={};app.data.settings.sections=data.settings.sections||[];
@@ -178,10 +185,31 @@ const all=n=>[n,...n.children.flatMap(all)];
  assert(JSON.stringify(adActions)===JSON.stringify(['refresh_lists','apply']),'Ad filter must refresh only lists and apply once, even on double click');
  assert(calls.slice(beforeEnableAds).filter(c=>c.method==='save_settings').length===1,'Double click repeated ad filter save');
  assert(modal===null,'Ad filter modal did not finish after confirmed apply');
+ app.adblockDialog();const beforeAdGuard=calls.length;await press('Включить AdGuard DNS');
+ assert(data.settings.dns_filter==='adguard','One-click AdGuard did not select filtering DNS');
+ assert(JSON.stringify(calls.slice(beforeAdGuard).filter(c=>c.method==='action').map(c=>c.args[0]))===JSON.stringify(['apply']),'AdGuard should apply without downloading unrelated lists');
+ assert(data.settings.sections.length===retainedSettings.sections.length,'One-click filter changed routing groups');
+ app.adblockDialog();await press('Выключить готовые фильтры');
+ assert(data.settings.dns_filter==='cloudflare'&&!data.settings.remote_lists.filter(x=>/pgl.yoyo|hagezi/.test(x.url)).some(x=>x.enabled),'Disable preset filters did not clear managed filters');
  app.securityRecommendations();modalControl('at-security-fix-global').checked=true;
  modalControl('at-security-fix-kill_switch').checked=true;await press('Сохранить рекомендации');
  assert(data.settings.mode==='global'&&data.settings.kill_switch,'Security recommendations were not saved');
  assert(data.settings.sections.length===retainedSettings.sections.length,'Security recommendations removed groups');
+ // Every disclosure, including nested field help, survives redraws and tab changes.
+ for(const tab of ['overview','subscriptions','nodes','routing','privacy','monitor','settings']){
+   app.navigate(tab);const details=app.root.querySelectorAll('details');details.forEach(x=>x.open=true);app.draw();
+   assert(app.root.querySelectorAll('details').every(x=>x.open),'Open disclosure collapsed on '+tab);
+   app.root.querySelectorAll('details').forEach(x=>x.open=false);app.draw();
+   assert(app.root.querySelectorAll('details').every(x=>!x.open),'Closed disclosure reopened on '+tab);
+ }
+ app.navigate('privacy');const audit=app.root.querySelectorAll('details').find(x=>x.textContent.startsWith('Подробный аудит, FakeIP и сетевые инструменты'));
+ assert(audit,'Detailed audit disclosure missing');audit.open=true;await pollCallback();
+ assert(app.root.querySelectorAll('details').find(x=>x.textContent.startsWith('Подробный аудит, FakeIP и сетевые инструменты')).open,'Status polling closed detailed audit');
+ app.navigate('overview');app.navigate('privacy');assert(app.root.querySelectorAll('details').find(x=>x.textContent.startsWith('Подробный аудит, FakeIP и сетевые инструменты')).open,'Tab navigation lost detailed audit');
+ assert(Object.keys(app.disclosureState).length<=7,'Disclosure state accumulates beyond available tabs');
+ app.navigate('overview');assert(app.root.textContent.includes('НАЧНИТЕ ЗДЕСЬ'),'Prominent wizard start block missing');
+ assert(all(app.root).filter(x=>x.tag==='button'&&x.textContent==='Настроить по вопросам').every(x=>(x.attributes.class||'').includes('at-wizard-launch')),'Wizard launch not emphasized');
+ const beforeMonitor=calls.filter(c=>c.method==='monitor').length;
  const pendingMonitor=app.requestMonitor();
  assert(app.requestMonitor()===pendingMonitor,'Concurrent monitor requests must share one promise');
  await pendingMonitor;
