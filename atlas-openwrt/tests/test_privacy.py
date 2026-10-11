@@ -125,6 +125,21 @@ class PrivacyFeatures(unittest.TestCase):
             {'config','service','kill_switch','controller','tun','dns_hijack','router_dns','dns_tls','real_ip_resolution','dhcp_dnsmasq','fakeip_dns','outbound_https'})
         self.assertNotIn('203.0.113.',str(result))
 
+    def test_dns_negative_answers_pass_but_resolver_failure_does_not(self):
+        atlas=__import__('atlas');current=state();config=core.make_config(current,api_secret='a'*64)
+        with tempfile.TemporaryDirectory() as temp:
+            config_path=Path(temp)/'config.json';config_path.write_text(__import__('json').dumps(config))
+            for code, expected in [(-2, True), (-5, True), (-3, False)]:
+                with self.subTest(errno=code), mock.patch.object(atlas,'CONFIG',config_path), mock.patch.object(atlas,'service_running',return_value=True), \
+                     mock.patch.object(atlas.socket,'EAI_NONAME',-2), mock.patch.object(atlas.socket,'EAI_NODATA',-5,create=True), \
+                     mock.patch.object(atlas,'check'), mock.patch.object(atlas,'clash_request',return_value={'proxies':{}}), \
+                     mock.patch.object(atlas,'system_interfaces',return_value={'atlas0'}), \
+                     mock.patch.object(atlas.socket,'getaddrinfo',side_effect=atlas.socket.gaierror(code,'test DNS answer')), \
+                     mock.patch.object(atlas,'runtime_status',return_value={'selected':core.all_nodes(current)[0]['key']}), \
+                     mock.patch.object(atlas,'probe',return_value={'ok':True,'latency_ms':42}):
+                    checks={item['id']:item['ok'] for item in atlas.selftest(current)['checks']}
+                self.assertEqual(checks['router_dns'], expected)
+
 
 if __name__ == '__main__':
     unittest.main()

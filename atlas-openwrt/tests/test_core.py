@@ -158,11 +158,12 @@ class Parsing(unittest.TestCase):
             with self.assertRaises(core.AtlasError): core.subscription_headers(bad)
 
     def test_unsupported_transport_not_silent(self):
-        with self.assertRaises(core.AtlasError):
+        with mock.patch.object(core.engine_features,'capabilities',return_value=[]), self.assertRaises(core.AtlasError):
             core.parse_subscription((BASE + '?type=xhttp').encode())
 
     def test_mixed_unsupported_reported(self):
-        result = core.parse_subscription((REALITY + '\n' + BASE + '?type=xhttp').encode())
+        with mock.patch.object(core.engine_features,'capabilities',return_value=[]):
+            result = core.parse_subscription((REALITY + '\n' + BASE + '?type=xhttp').encode())
         self.assertEqual(len(result['nodes']), 1)
         self.assertEqual(len(result['warnings']), 1)
 

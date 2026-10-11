@@ -54,6 +54,34 @@ class DnsmasqIntegration(unittest.TestCase):
         self.assertIn(['/sbin/uci', 'set', 'dhcp.@dnsmasq[0].cachesize=0'], calls)
         self.assertIn(['/etc/init.d/dnsmasq', 'restart'], calls)
 
+    def test_disabled_integration_without_backup_does_not_read_dhcp(self):
+        with mock.patch.object(atlas, 'dnsmasq_config', side_effect=AssertionError('DHCP must remain untouched')), mock.patch.object(atlas, 'run') as run:
+            result = atlas.manage_dhcp_dns(False)
+        self.assertEqual(result, {'enabled': False, 'restored': False, 'changed_by_admin': []})
+        run.assert_not_called()
+
+    def test_multiline_unrelated_option_does_not_block_managed_dns(self):
+        output = b"dhcp.@dnsmasq[0]=dnsmasq\ndhcp.@dnsmasq[0].rebind_domain='first.example\nsecond.example'\ndhcp.@dnsmasq[0].server='1.1.1.1' '9.9.9.9'\ndhcp.@dnsmasq[0].noresolv='0'\n"
+        with mock.patch.object(atlas, 'run', return_value=command_result([], output)):
+            config = atlas.dnsmasq_config()
+        self.assertEqual(config['@dnsmasq[0]']['server'], ['1.1.1.1', '9.9.9.9'])
+        self.assertEqual(config['@dnsmasq[0]']['noresolv'], ['0'])
+
+    def test_backup_keeps_every_server_in_real_uci_list_format(self):
+        output = b"dhcp.@dnsmasq[0]=dnsmasq\ndhcp.@dnsmasq[0].server='/local.example/192.0.2.53' '9.9.9.9' '1.1.1.1'\n"
+        with mock.patch.object(atlas, 'run', side_effect=lambda args, timeout=10: command_result(args, output if args[-2:] == ['show', 'dhcp'] else b'')):
+            atlas.manage_dhcp_dns(True)
+        saved = json.loads(self.backup.read_text())['sections'][0]['options']['server']['values']
+        self.assertEqual(saved, ['/local.example/192.0.2.53', '9.9.9.9', '1.1.1.1'])
+
+    def test_invalid_owned_option_is_rejected_before_dns_changes(self):
+        output = b"dhcp.@dnsmasq[0]=dnsmasq\ndhcp.@dnsmasq[0].server='unterminated\n"
+        with mock.patch.object(atlas, 'run', return_value=command_result([], output)) as run:
+            with self.assertRaises(atlas.AtlasError):
+                atlas.manage_dhcp_dns(True)
+        self.assertEqual(run.call_count, 1)
+        self.assertFalse(self.backup.exists())
+
     def test_dnsmasq_setting_builds_loopback_inbound_and_fake_dns_audit(self):
         current = core.defaults()
         current['settings']['dhcp_dns_enabled'] = True

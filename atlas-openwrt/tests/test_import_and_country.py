@@ -172,6 +172,33 @@ class ImportAndCountry(unittest.TestCase):
             with self.assertRaises(core.AtlasError):
                 atlas.proxied_https_get(node, hostname, path, limit)
 
+    def test_single_node_probe_ignores_unavailable_section_pools(self):
+        current = sample()
+        node = core.all_nodes(current)[0]
+        sid = 'a' * 16
+        current['settings'].update(fetch_lists_via_proxy=True, fetch_lists_section=sid,
+            sections=[dict(id=sid, name='List-only', policy='proxy', pool='b'*16,
+                           domains=[], cidrs=[], source_ips=[], source_interfaces=['br-lan'])],
+            remote_lists=[dict(name='source', url='https://example.org/list.txt',
+                              policy='proxy', format='domains', enabled=True, section=sid)])
+        fake_socket = mock.MagicMock()
+        fake_socket.__enter__.return_value.getsockname.return_value = ('127.0.0.1', 23111)
+        captured = []
+        def make_config(*args, **kwargs):
+            config = core.make_config(*args, **kwargs)
+            captured.append(config)
+            return config
+        with mock.patch.object(atlas.socket, 'socket', return_value=fake_socket), \
+             mock.patch.object(atlas, 'make_config', side_effect=make_config), \
+             mock.patch.object(atlas.subprocess, 'Popen', side_effect=RuntimeError('stop before network')):
+            with self.assertRaisesRegex(RuntimeError, 'stop before network'):
+                atlas.probe(node, directory=self.tmp.name, settings=current['settings'])
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(len(captured[0]['inbounds']), 1)
+        self.assertEqual(captured[0]['inbounds'][0]['type'], 'mixed')
+        self.assertFalse(any(o['tag'].startswith('pool_') for o in captured[0]['outbounds']))
+        self.assertEqual(current['settings']['sections'][0]['pool'], 'b'*16)
+
     def test_new_import_method_is_administrator_only(self):
         acl = json.loads((Path(__file__).resolve().parents[1] / 'root/usr/share/rpcd/acl.d/atlas.json').read_text())['luci-app-atlas']
         self.assertIn('import_profiles', acl['write']['ubus']['atlas'])

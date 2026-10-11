@@ -777,6 +777,12 @@ def dnsmasq_config():
             selectors.append(match.group(1))
     config = {selector: {'server': [], 'noresolv': [], 'cachesize': []} for selector in selectors}
     for line in raw.splitlines():
+        key = line.partition('=')[0]
+        match = re.match(r'^dhcp\.(@dnsmasq\[\d+\]|[A-Za-z0-9_-]+)\.(server|noresolv|cachesize)$', key)
+        # UCI permits multiline values in unrelated DHCP options. Atlas only
+        # owns these three dnsmasq options; do not parse other records as shell.
+        if not match or match.group(1) not in config:
+            continue
         try:
             fields = shlex.split(line, posix=True, comments=False)
         except (ValueError,RecursionError) as exc:
@@ -786,9 +792,9 @@ def dnsmasq_config():
         key, sep, value = fields[0].partition('=')
         if not sep:
             continue
-        match = re.match(r'^dhcp\.(@dnsmasq\[\d+\]|[A-Za-z0-9_-]+)\.(server|noresolv|cachesize)$', key)
         if match and match.group(1) in config:
-            config[match.group(1)][match.group(2)].append(value)
+            # uci show renders a list on one line as key='first' 'second'.
+            config[match.group(1)][match.group(2)].extend([value] + fields[1:])
     return config
 
 
@@ -818,6 +824,8 @@ def manage_dhcp_dns(enabled):
     if type(enabled) is not bool:
         raise AtlasError('Некорректный режим DNS для dnsmasq')
     backup = read_json(DHCP_BACKUP, None)
+    if not enabled and not backup:
+        return {'enabled': False, 'restored': False, 'changed_by_admin': []}
     config = dnsmasq_config()
     if not config:
         if enabled:
@@ -1221,6 +1229,7 @@ def apply(current, enable=False):
             raise AtlasError('Работает %s. Сначала отключите конфликтующий сервис.' % name)
     candidate = runtime_config(current)
     required_interfaces = {section['interface'] for section in current['settings'].get('sections', []) if section.get('policy') == 'interface' and section.get('enabled', True)}
+    required_interfaces.update(current['settings'].get('capture_interfaces', []))
     required_interfaces.update(interface for section in current['settings'].get('sections', [])
                                for interface in section.get('source_interfaces', []) if section.get('enabled', True))
     if current['settings'].get('default_interface'):
@@ -1366,6 +1375,11 @@ def probe(node, binary=BINARY, directory=RUN, settings=None):
         s.bind(('127.0.0.1', 0))
         listen_port = s.getsockname()[1]
     active_settings = validate_settings(settings or defaults()['settings'])
+    # A single-node probe has no subscription pools or scoped TUN listeners.
+    # Keep transport/DNS options but remove unrelated routing references.
+    active_settings.update(sections=[], remote_lists=[], section_choices={},
+                           fetch_lists_via_proxy=False, fetch_lists_section='',
+                           fetch_lists_subscription='', mixed_proxy_enabled=False)
     config = make_config({'settings': active_settings, 'subscriptions': []}, tun=False,
                          mixed_port=listen_port, probe_node=node)
     test_url = urlsplit(active_settings['urltest_url'])
@@ -1379,7 +1393,11 @@ def probe(node, binary=BINARY, directory=RUN, settings=None):
         path.write_text(json.dumps(config))
         path.chmod(0o600)
         logfile = open(Path(tmp) / 'engine.log', 'w+b')
-        process = subprocess.Popen([binary, 'run', '-c', str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=logfile)
+        try:
+            process = subprocess.Popen([binary, 'run', '-c', str(path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=logfile)
+        except Exception:
+            logfile.close()
+            raise
         stage = 'engine'
         try:
             for _ in range(30):
@@ -1752,7 +1770,7 @@ def selftest(current):
         dns_ok, dns_message = True, 'Новый DNS-запрос через роутер получил ответ'
     except socket.gaierror as exc:
         # A negative answer still proves the DNS path is live; only resolver failures fail this check.
-        if getattr(exc, 'errno', None) == getattr(socket, 'EAI_NONAME', -2):
+        if getattr(exc, 'errno', None) in (getattr(socket, 'EAI_NONAME', -2), getattr(socket, 'EAI_NODATA', -5)):
             dns_ok, dns_message = True, 'DNS-резолвер ответил (тестовое имя отсутствует, как и ожидается)'
     except OSError:
         pass
@@ -2308,7 +2326,7 @@ def main():
         return
     if len(sys.argv) > 1 and sys.argv[1] in ('ingress-sync','ingress-restore'):
         config=read_json(CONFIG,{})
-        enabled=sys.argv[1]=='ingress-sync' and any(x.get('include_interface') for x in config.get('inbounds',[]))
+        enabled=sys.argv[1]=='ingress-sync' and any(x.get('include_interface') and re.fullmatch(r'atli[0-9]+',x.get('interface_name','')) for x in config.get('inbounds',[]))
         manage_ingress_firewall(enabled)
         return
     if len(sys.argv) > 1 and sys.argv[1] == 'iface-event':

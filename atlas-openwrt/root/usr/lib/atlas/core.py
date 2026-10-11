@@ -793,7 +793,7 @@ def defaults():
         'udp_over_tcp': False, 'udp_over_tcp_version': 2,
         'interface_monitoring': False, 'monitored_interfaces': [], 'interface_reload_delay_ms': 2000, 'default_interface': '', 'log_level': 'warn',
         'dns_filter': 'cloudflare', 'fakeip': False, 'fakeip_ttl_seconds': 60, 'resolve_real_ip': False, 'browser_diagnostics': False, 'yacd_enabled': False, 'yacd_wan': False, 'yacd_listen': '127.0.0.1', 'blocked_domains': [], 'max_active_nodes': 512,
-        'routing_excluded_ips': [], 'routed_source_ips': [], 'sections': [], 'disable_quic': False, 'exclude_ntp': False,
+        'routing_excluded_ips': [], 'routed_source_ips': [], 'capture_interfaces': [], 'sections': [], 'disable_quic': False, 'exclude_ntp': False,
         'kill_switch': False,
         'custom_dns_type': 'https', 'custom_dns_server': '', 'custom_dns_sni': '', 'custom_dns_path': '/dns-query',
         'mixed_proxy_enabled': False, 'mixed_proxy_listen': '', 'mixed_proxy_port': 2080,
@@ -809,6 +809,15 @@ def validate_settings(data):
     if set(data) - set(result):
         raise AtlasError('Неизвестная настройка')
     result.update(data)
+    if not isinstance(result['capture_interfaces'], list):
+        raise AtlasError('Входные интерфейсы должны быть массивом')
+    capture = []
+    for interface in result['capture_interfaces']:
+        if not isinstance(interface, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,15}', interface) or interface in ('lo', 'atlas0') or re.fullmatch(r'atli[0-9]+', interface):
+            raise AtlasError('Некорректный входной интерфейс')
+        if interface not in capture:
+            capture.append(interface)
+    result['capture_interfaces'] = capture
     if type(result['interface_reload_delay_ms']) is not int or not 0 <= result['interface_reload_delay_ms'] <= 60000:
         raise AtlasError('Задержка восстановления WAN: 0–60000 мс')
     if type(result['list_max_bytes']) is not int or not 0 <= result['list_max_bytes'] <= 256 * 1024 * 1024:
@@ -1522,6 +1531,8 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
     inbound = {'type': 'tun', 'tag': 'tun', 'interface_name': 'atlas0',
                'address': ['172.31.255.1/30', 'fdfe:dcba:9876::1/126'], 'mtu': 1400,
                'auto_route': True, 'auto_redirect': True, 'strict_route': True, 'stack': 'system'}
+    if tun and settings['capture_interfaces']:
+        inbound['include_interface'] = settings['capture_interfaces']
     if not tun:
         inbound = {'type': 'mixed', 'tag': 'local', 'listen': '127.0.0.1', 'listen_port': mixed_port}
     rules = [{'action': 'sniff'}, {'protocol': 'dns', 'action': 'hijack-dns'}]
@@ -1603,8 +1614,13 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                 match['port'] = exact
             else:
                 match['port_range'] = ranges
-        if not match and not section['source_interfaces']:
-            continue
+        if not match:
+            assigned_lists = any(item['enabled'] and item['section'] == section['id']
+                                 for item in settings['remote_lists'])
+            # An interface scopes assigned list matches; it must not turn a
+            # list-only section into a catch-all before those lists are applied.
+            if not section['source_interfaces'] or assigned_lists:
+                continue
         match=section_match(section,match)
         if section['policy'] == 'block':
             rules.append(dict(match, action='reject'))
@@ -1760,6 +1776,17 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             dns_rules.append(domain_dns_rule({'domain_suffix': settings['domains']}, True))
     # A deny rule must win over a custom DNS resolver or FakeIP rewrite.
     dns_rules = [rule for rule in dns_rules if rule.get('action') == 'reject'] + priority_dns_exclusions + [rule for rule in dns_rules if rule.get('action') != 'reject']
+    if settings['fakeip']:
+        # List downloads validate real public addresses before opening a connection.
+        # Keep their hosts out of FakeIP; the list-fetch inbound still selects its proxy.
+        list_hosts = sorted({urlsplit(item['url']).hostname for item in settings['remote_lists']
+                             if item['enabled'] and urlsplit(item['url']).scheme in ('http', 'https')})
+        # GitHub release URLs redirect binary rule sets to this public CDN.
+        if any(host in ('github.com', 'api.github.com') for host in list_hosts):
+            list_hosts = sorted(set(list_hosts) | {'release-assets.githubusercontent.com'})
+        if list_hosts:
+            first_route = next((i for i, rule in enumerate(dns_rules) if rule.get('action') != 'reject'), len(dns_rules))
+            dns_rules.insert(first_route, {'domain': list_hosts, 'action': 'route', 'server': 'secure'})
     if settings['browser_diagnostics']:
         dns_rules[0:0] = [
             {'domain': ['fakeip.podkop.fyi', 'ip.podkop.fyi'], 'query_type': ['HTTPS'], 'action': 'reject'},
