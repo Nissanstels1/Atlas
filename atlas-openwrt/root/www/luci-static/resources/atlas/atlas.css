@@ -7,3 +7,24 @@
 .at-modal{box-sizing:border-box;width:100%;max-width:100%}.at-modal .at-footnote,.at-modal .at-help,.at-modal .at-help p,.at-modal .at-field small{color:#4b5563!important}.at-modal .at-help>summary{color:#65518d!important}.at-modal .at-btn.ghost,.at-modal+.right .at-btn.ghost{color:#403451!important;background:#f1eef7!important;border-color:#b1a7c1!important}.at-modal .at-btn.ghost:hover,.at-modal+.right .at-btn.ghost:hover{background:#e6dfef!important}.at-modal .at-advanced{border-color:#c8c4d2}.at-modal .at-service-card{border-color:#d8d4df}.at-modal .at-inline-error{color:#a82020!important;line-height:1.55;overflow-wrap:anywhere}
 
 .at-section-step{padding:18px 0;border-bottom:1px solid #7774}.at-section-step>h3{margin:0 0 10px}.at-source-row{padding:14px;border:1px solid #c8c4d2;border-radius:10px;margin:14px 0}.at-source-row .at-actions{align-items:center}.at-source-row .at-field{flex:1;min-width:130px}.at-modal .at-section-step h3{font-size:18px}
+
+/* Cards must adapt to their available width, including LuCI sidebars and zoom. */
+.at-stats{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
+.atlas .at-topbar{margin:0;width:100%;max-width:100%}
+.at-stat strong{white-space:normal;overflow-wrap:anywhere;line-height:1.2}
+.at-stat small,.at-stat-title{overflow-wrap:anywhere}
+.atlas :is(h1,h2,h3,p,strong,small,dd,summary),.at-modal :is(h1,h2,h3,p,strong,small,dd,summary){overflow-wrap:anywhere}
+.at-sub-row>*,.at-hero-copy,.at-topbar>*,.at-actions>*{min-width:0;max-width:100%}
+.atlas .at-btn,.at-modal .at-btn{white-space:normal;overflow-wrap:anywhere;max-width:100%;text-align:center}
+.atlas .at-pill,.at-modal .at-pill{white-space:normal;overflow-wrap:anywhere;max-width:100%}
+.atlas :is(input,select,textarea),.at-modal :is(input,select,textarea){min-width:0;max-width:100%}
+.atlas pre,.at-modal pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}
+@media(max-width:650px){
+ .at-content{padding:16px 12px}.at-topbar{padding:18px 12px}
+ .at-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .at-stat{padding:16px 12px}.at-stat strong{font-size:21px}
+ .at-grid-2{grid-template-columns:minmax(0,1fr)}
+ .at-source-row .at-field{min-width:0;flex-basis:100%}
+ .at-section-head{flex-wrap:wrap}.at-section-head>.at-actions{width:100%}
+}
+@media(max-width:360px){.at-stats{grid-template-columns:minmax(0,1fr)}}
