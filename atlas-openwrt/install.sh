@@ -23,10 +23,10 @@ elif command -v apk >/dev/null 2>&1; then
 else echo 'No supported package manager.'; exit 1
 fi
 # Install the verified post-release fixes from one immutable source revision.
-repair_ref=c7589f46804fa3d176ca60c94eb010a509cfa492
+repair_ref=37208171a16c882811c7f514269e7a24e19df075
 wget -q -O "$directory/repair.sh" "https://raw.githubusercontent.com/Nissanstels1/Atlas/$repair_ref/atlas-openwrt/tools/repair-nanopi-audit.sh"
 actual=$(sha256sum "$directory/repair.sh" | awk '{print $1}')
-[ "$actual" = '8b8758b1dcbf0b3012c274e92f3ae094054672938f06cfc63472fa3cfa95eab0' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
+[ "$actual" = '1bd151aa78dfedc8f6ccbd387d708069b7314840ac291b3f36dac9c2d03d9106' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
 # Pin the repair's source downloads too; future main changes cannot mix revisions.
 /usr/bin/python3 - "$directory/repair.sh" "$repair_ref" <<'PY'
 from pathlib import Path
@@ -35,6 +35,7 @@ p=Path(sys.argv[1])
 p.write_text(p.read_text().replace('/Atlas/main/','/Atlas/'+sys.argv[2]+'/'))
 PY
 sh "$directory/repair.sh"
+/usr/bin/python3 -c 'from pathlib import Path; p=Path("/tmp/luci-indexcache"); p.unlink() if p.is_file() else None'
 /etc/init.d/rpcd restart
 # A visible LuCI menu alone does not mean the backend was installed successfully.
 if ! /usr/libexec/rpcd/atlas list > "$directory/methods.json"; then
