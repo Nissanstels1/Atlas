@@ -103,4 +103,8 @@
 .atlas .at-unassigned-list{padding:12px}
 .at-section-sources .at-source-row{padding:10px;margin:8px 0}
 .at-section-sources .at-field{margin:6px 0}
+.atlas [hidden],.at-modal [hidden],.at-section-editor [hidden]{display:none!important}
+.at-settings-advanced{margin:16px 0;padding:12px;border:1px solid #7773;border-radius:10px}
+.at-settings-advanced>summary{cursor:pointer;font-weight:600}
+.at-settings-fields{padding-top:12px}
 @media(max-width:650px){.atlas .at-section-summary .at-actions>.at-btn{flex:0 1 auto;width:auto;min-width:0}}
