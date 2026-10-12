@@ -2405,6 +2405,14 @@ def rpc_request_limit(method):
     return 131072
 
 
+def boot_grace_active(path=Path('/proc/uptime')):
+    try:
+        elapsed=float(path.read_text().split()[0])
+        return 0 <= elapsed < 120
+    except (OSError, ValueError, IndexError):
+        return False
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == 'list':
         print(json.dumps(METHODS))
@@ -2446,6 +2454,8 @@ def main():
         interface_event_worker(sys.argv[2],int(sys.argv[3]) if len(sys.argv)>3 else None)
         return
     if len(sys.argv) > 1 and sys.argv[1] == 'scheduled':
+        if boot_grace_active():
+            return  # Let init.d and network startup complete before recovery/refresh.
         current = state()
         try:
             with locked():

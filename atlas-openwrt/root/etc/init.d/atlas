@@ -5,6 +5,10 @@ USE_PROCD=1
 
 atlas_start_failed() {
     logger -t atlas "Start failed at $1; restoring LAN DNS and scoped firewall"
+    umask 077
+    mkdir -p /etc/atlas
+    printf '{"stage":"%s","at":%s}\n' "$1" "$(date +%s)" > /etc/atlas/last-start-failure.json.new
+    mv /etc/atlas/last-start-failure.json.new /etc/atlas/last-start-failure.json
     /usr/bin/python3 /usr/lib/atlas/atlas.py dhcp-restore >/tmp/atlas-start-restore.log 2>&1
     /usr/bin/python3 /usr/lib/atlas/atlas.py ingress-restore >>/tmp/atlas-start-restore.log 2>&1
     return 1

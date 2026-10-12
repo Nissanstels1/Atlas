@@ -216,7 +216,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=boot-pools-20261012' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=section-lists-20261012' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -562,7 +562,7 @@ return view.extend({
             else if(/^(Название|Группа включена|Действие|Подключение для группы|Исходящий VPN-интерфейс)/.test(text))connection.push(child);
             else extras.push(child);
         });
-        content.replaceChildren.apply(content,[node('section','at-section-step',[node('h3','',label('1. Подключение и профили')),node('p','at-footnote',label('Выберите маршрут и подписку с профилями. Для прямого подключения или блокировки профиль не нужен.')),node('div','',connection)]),node('section','at-section-step',[node('h3','',label('2. Домены и IP этой секции')),node('p','at-footnote',label('Внутри поля записи означают «любая из перечисленных». Разные заполненные поля ограничивают друг друга: домен И IP устройства. Для независимых условий создайте отдельные секции. Пустые поля не ограничивают маршрут.')),node('div','',targets)]),node('section','at-section-step',sources),node('section','at-section-step',exceptions),atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Автопроверка профилей и дополнительные параметры'),node('div','',extras)])].concat(errors));
+        content.replaceChildren.apply(content,[node('section','at-section-step',[node('h3','',label('1. Подключение и профили')),node('p','at-footnote',label('Эта секция объединяет подключение и его сайты. Все домены, IP и списки ниже используют выбранное здесь подключение. При автовыборе сервер может меняться, а списки остаются у секции.')),node('div','',connection)]),node('section','at-section-step',[node('h3','',label('2. Домены и IP этой секции')),node('p','at-footnote',label('Внутри поля записи означают «любая из перечисленных». Разные заполненные поля ограничивают друг друга: домен И IP устройства. Для независимых условий создайте отдельные секции. Пустые поля не ограничивают маршрут.')),node('div','',targets)]),node('section','at-section-step',sources),node('section','at-section-step',exceptions),atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Автопроверка профилей и дополнительные параметры'),node('div','',extras)])].concat(errors));
         return content;
     },
     routingLayout: function(content) {
@@ -721,8 +721,10 @@ return view.extend({
                 var url=node('input','at-input',[],{value:item.url || '',placeholder:item.format==='cidrs' ? 'https://example.org/ip.txt' : 'https://example.org/domains.txt'});
                 var format=node('select','at-input',['auto','domains','cidrs','srs','json','hosts','adguard'].map(function(f){return atlasElement('option',{value:f,selected:f===(item.format || 'auto')},f);}));
                 var on=node('input','',[],{type:'checkbox',checked:item.enabled!==false});
+                var privateFlag=node('input','',[],{type:'checkbox',checked:!!item.allow_private}),linkFlag=node('input','',[],{type:'checkbox',checked:!!item.allow_symlinks});privateFlag.addEventListener('change',function(){item.allow_private=privateFlag.checked;});linkFlag.addEventListener('change',function(){item.allow_symlinks=linkFlag.checked;});
+                var permissions=atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Дополнительно: загрузка из локальной сети и файлов'),node('label','at-checkbox',[privateFlag,label('Разрешить URL списка из локальной сети')]),node('p','at-footnote',label('Нужно только если адрес скачивания списка находится внутри вашей сети, например http://192.168.1.10/domains.txt. Это не настройка маршрутизации устройств. Для обычных ссылок в интернете оставьте выключенным.')),node('label','at-checkbox',[linkFlag,label('Разрешить локальному файлу быть символьной ссылкой')]),node('p','at-footnote',label('Нужно только для file:/// списка, если файл является ссылкой на другой файл. Обычным спискам не требуется.'))]);
                 title.addEventListener('input',function(){item.name=title.value;});url.addEventListener('input',function(){item.url=url.value;});format.addEventListener('change',function(){item.format=format.value;});on.addEventListener('change',function(){item.enabled=on.checked;});
-                return node('div','at-source-row',[node('div','at-grid-2',[self.field('Название списка',title),self.field('Адрес списка или file:///путь',url)]),node('div','at-actions',[node('label','at-checkbox',[on,label('Использовать список')]),self.field('Формат файла',format),self.button('Удалить список',function(){listRows.splice(index,1);renderSources();},'danger-link')])]);
+                return node('div','at-source-row',[node('div','at-grid-2',[self.field('Название списка',title),self.field('Адрес списка или file:///путь',url)]),node('div','at-actions',[node('label','at-checkbox',[on,label('Использовать список')]),self.field('Формат файла',format),self.button('Удалить список',function(){listRows.splice(index,1);renderSources();},'danger-link')]),permissions]);
             }));}
             function addSource(format,url,name){listRows.push({id:self.newGroupId(),name:name || 'Новый список',url:url || '',format:format,enabled:true,policy:policy.value==='interface' ? 'proxy' : policy.value,section:original.id});renderSources();}
             var catalogue=node('select','at-input',[['youtube','YouTube'],['hdrezka','HDRezka'],['discord','Discord'],['telegram','Telegram'],['google_ai','Google AI'],['meta','Meta'],['twitter','Twitter / X'],['russia_inside','Россия внутри'],['russia_outside','Россия снаружи'],['geoblock','Геоблокировки']].map(function(x){return atlasElement('option',{value:x[0]},x[1]);}));
@@ -799,9 +801,9 @@ return view.extend({
             serializedSections = sections.value;
             sectionList.replaceChildren.apply(sectionList, sectionDraft.map(function(x, index) {
                 function move(delta) { var other = index + delta; if (other < 0 || other >= sectionDraft.length) return; var saved=sectionDraft[index];sectionDraft[index]=sectionDraft[other];sectionDraft[other]=saved;syncSections(); }
-                return node('article', 'at-card at-padded', [node('strong', '', label(x.name)), node('p', 'at-footnote', label((x.enabled === false ? 'Выключена · ' : '') + ({proxy:'Прокси',direct:'Напрямую',exclude:'Исключение',block:'Блокировать',interface:'VPN'}[x.policy] || x.policy) + (x.outbound_config_set || (x.outbound_config || []).length ? ' · JSON outbound' : '') + (x.mixed_proxy && x.mixed_proxy.enabled ? ' · HTTP/SOCKS ' + x.mixed_proxy.listen + ':' + x.mixed_proxy.port : ''))), node('p','at-footnote',label((x.domains || []).slice(0,4).join(', ')+(x.domains && x.domains.length>4 ? ' и ещё '+(x.domains.length-4) : '')+' · списков: '+sectionSources.get().filter(function(l){return l.section===x.id;}).length+' · '+(x.site_checks && x.site_checks.length ? 'Автовыбор по доступности '+x.site_checks.length+' сайтов' : x.policy==='proxy' ? 'Общая проверка профилей' : 'Профиль не требуется'))),node('div','at-actions',[
+                return node('article', 'at-card at-padded at-section-summary', [node('strong', '', label(x.name)), node('p', 'at-footnote', label((x.enabled === false ? 'Выключена · ' : '') + ({proxy:'Прокси',direct:'Напрямую',exclude:'Исключение',block:'Блокировать',interface:'VPN'}[x.policy] || x.policy) + (x.outbound_config_set || (x.outbound_config || []).length ? ' · JSON outbound' : '') + (x.mixed_proxy && x.mixed_proxy.enabled ? ' · HTTP/SOCKS ' + x.mixed_proxy.listen + ':' + x.mixed_proxy.port : ''))), node('p','at-footnote',label((x.domains || []).slice(0,4).join(', ')+(x.domains && x.domains.length>4 ? ' и ещё '+(x.domains.length-4) : '')+' · списков: '+sectionSources.get().filter(function(l){return l.section===x.id;}).length+' · '+(x.site_checks && x.site_checks.length ? 'Автовыбор по доступности '+x.site_checks.length+' сайтов' : x.policy==='proxy' ? 'Общая проверка профилей' : 'Профиль не требуется'))),node('div','at-actions',[
                     self.button('Настроить секцию', function() { return self.sectionDialog(x, function(value) { if(sectionDraft.some(function(y,i){return i!==index&&y.name.toLowerCase()===value.name.toLowerCase();})) throw new Error('Название секции уже используется');sectionDraft[index]=value;syncSections(); },sectionSources); }, '', self.busy()),
-                    self.button('Копировать сохранённую',function(){self.cloneSectionDialog(x);},'ghost',self.busy()||!x.id),
+                    self.button('Копировать',function(){self.cloneSectionDialog(x);},'ghost',self.busy()||!x.id),
                     self.button('↑',function(){move(-1);},'ghost',index===0||self.busy()),self.button('↓',function(){move(1);},'ghost',index===sectionDraft.length-1||self.busy()),
                     self.button('Удалить из формы',function(){sectionDraft.splice(index,1);syncSections();ui.addNotification(null,node('p','',label('Группа удалена из формы. При сохранении связанные списки будут выключены; их источники и кеш сохраняются.')),'info');},'danger-link',self.busy())
                 ])]);
@@ -832,10 +834,10 @@ return view.extend({
             var privateAccess = node('input','at-list-private',[],{type:'checkbox',checked:!!item.allow_private});
             var symlinks = node('input','at-list-symlinks',[],{type:'checkbox',checked:!!item.allow_symlinks});
             listPermissions[item.id || String(index)] = {privateAccess:privateAccess,symlinks:symlinks};
-            return node('div','at-card at-padded',[
-                self.field('Выход списка «' + item.name + '»',select,'Список использует выход выбранной группы. Для прямого маршрута и блокировки политики списка и группы должны совпадать.'),
-                node('label','at-checkbox',[privateAccess,label('Доступ к частным адресам для этого списка')]),
-                node('label','at-checkbox',[symlinks,label('Разрешить символьные ссылки для этого списка')])
+            if(item.section){var owner=(s.sections || []).find(function(x){return x.id===item.section;});return node('p','at-owned-list-note',label(item.name+' → секция «'+(owner ? owner.name : 'не найдена')+'». Редактируется внутри «Настроить секцию».'));}
+            return node('div','at-card at-padded at-unassigned-list',[
+                self.field('Добавить список «' + item.name + '» к секции',select,'Выберите секцию: её подключение будет использоваться для сайтов из списка. После назначения редактируйте список внутри этой секции.'),
+                atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Особые разрешения загрузки'),node('label','at-checkbox',[privateAccess,label('Скачивать список из локальной сети')]),node('label','at-checkbox',[symlinks,label('Следовать ссылкам на локальные файлы')])])
             ]);
         }));
         var communityLists = [
