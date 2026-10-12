@@ -1,5 +1,6 @@
 """Run the public bootstrap against isolated package-manager/RPC fixtures."""
 import hashlib
+import re
 import os
 from pathlib import Path
 import shutil
@@ -29,6 +30,11 @@ class BootstrapTests(unittest.TestCase):
             release.write_text("DISTRIB_RELEASE='24.10.1'\n")
             installer = base / 'installer.sh'
             installer.write_text('#!/bin/sh\necho release >> "' + shell_path(log) + '"\n')
+            repair=base / 'repair.sh'
+            repair.write_text('#!/bin/sh\necho repair >> "'+shell_path(log)+'"\n')
+            rpcd=base / 'rpcd'
+            rpcd.write_text('#!/bin/sh\necho rpcd >> "'+shell_path(log)+'"\n')
+            rpcd.chmod(0o755)
             backend = base / 'atlas'
             backend.write_text('#!/bin/sh\n' + ('exit 1' if failure == 'backend' else "echo '[]'" if failure == 'methods' else "echo '{\"status\":{}}'") + '\n')
             backend.chmod(0o755)
@@ -38,7 +44,7 @@ class BootstrapTests(unittest.TestCase):
                 python.chmod(0o755)
             bodies = {
                 'id': 'echo 0', 'uname': 'echo aarch64',
-                'wget': 'cp "' + shell_path(installer) + '" "$3"',
+                'wget': 'case "$4" in *repair-nanopi-audit.sh) cp "'+shell_path(repair)+'" "$3";; *) cp "'+shell_path(installer)+'" "$3";; esac',
                 manager: 'echo "$*" >> "' + shell_path(log) + '"\n' + ('exit 1' if failure == 'manager' else 'exit 0'),
                 'ubus': 'exit 1' if failure == 'rpc' else 'echo atlas',
                 'sleep': 'exit 0',
@@ -54,7 +60,8 @@ class BootstrapTests(unittest.TestCase):
                 source = source.replace('command -v '+command+' >/dev/null 2>&1',
                                         '[ -x "'+shell_path(binaries / command)+'" ]')
             source = source.replace('63bc588105e12aff89e9dff8713cc112a7130a7bb02517b593e90cde58e63497', hashlib.sha256(installer.read_bytes()).hexdigest())
-            for original, target in [('/etc/openwrt_release', release), ('/usr/bin/python3', python), ('/usr/libexec/rpcd/atlas', backend)]:
+            source=re.sub(r"'[0-9a-f]{64}'(?= \] \|\| \{ echo 'Post-release repair)","'"+hashlib.sha256(repair.read_bytes()).hexdigest()+"'",source)
+            for original, target in [('/etc/openwrt_release', release), ('/usr/bin/python3', python), ('/usr/libexec/rpcd/atlas', backend),('/etc/init.d/rpcd',rpcd)]:
                 source = source.replace(original, shell_path(target))
             source = source.replace('/tmp/atlas-bootstrap.', shell_path(base) + '/atlas-bootstrap.')
             script = base / 'bootstrap.sh'
@@ -72,6 +79,8 @@ class BootstrapTests(unittest.TestCase):
                 self.assertIn('python3-light', operations)
                 self.assertIn('python3-cryptography', operations)
                 self.assertIn('release', operations)
+                self.assertIn('repair', operations)
+                self.assertIn('rpcd', operations)
                 self.assertIn('backend verified', result.stdout)
 
     def test_incomplete_install_is_never_successful(self):

@@ -792,7 +792,7 @@ def defaults():
         'bootstrap_dns_sni': 'cloudflare-dns.com', 'bootstrap_dns_path': '/dns-query',
         'udp_over_tcp': False, 'udp_over_tcp_version': 2,
         'interface_monitoring': False, 'monitored_interfaces': [], 'interface_reload_delay_ms': 2000, 'default_interface': '', 'log_level': 'warn',
-        'dns_filter': 'cloudflare', 'fakeip': False, 'fakeip_ttl_seconds': 60, 'resolve_real_ip': False, 'browser_diagnostics': False, 'yacd_enabled': False, 'yacd_wan': False, 'yacd_listen': '127.0.0.1', 'blocked_domains': [], 'max_active_nodes': 512,
+        'dns_filter': 'cloudflare', 'fakeip': False, 'fakeip_ttl_seconds': 60, 'resolve_real_ip': False, 'browser_diagnostics': False, 'yacd_enabled': False, 'yacd_wan': False, 'yacd_listen': '127.0.0.1', 'blocked_domains': [], 'max_active_nodes': 2048,
         'routing_excluded_ips': [], 'routed_source_ips': [], 'capture_interfaces': [], 'sections': [], 'disable_quic': False, 'exclude_ntp': False,
         'kill_switch': False,
         'custom_dns_type': 'https', 'custom_dns_server': '', 'custom_dns_sni': '', 'custom_dns_path': '/dns-query',
@@ -854,7 +854,7 @@ def validate_settings(data):
         raise AtlasError('Некорректный выбор узла')
     if type(result['interval_hours']) is not int or not 1 <= result['interval_hours'] <= 168:
         raise AtlasError('Интервал: 1–168 часов')
-    if type(result['max_active_nodes']) is not int or result['max_active_nodes'] not in (0, 128, 256, 512, 1024):
+    if type(result['max_active_nodes']) is not int or result['max_active_nodes'] not in (0, 128, 256, 512, 1024, 2048, 4096):
         raise AtlasError('Пул активных профилей: 0 без лимита либо 128, 256, 512, 1024')
     for key, minimum, maximum in [('auto_interval_seconds', 30, 1800), ('auto_tolerance_ms', 1, 2000)]:
         if type(result[key]) is not int or not minimum <= result[key] <= maximum:
@@ -1097,7 +1097,7 @@ def validate_settings(data):
     sections, names = [], set()
     for section in result['sections']:
         required = {'name', 'policy', 'domains', 'cidrs', 'source_ips'}
-        allowed = required | {'pool', 'interface', 'resolver', 'source_interfaces', 'ports', 'networks', 'id', 'enabled', 'mixed_proxy', 'outbound_config', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips', 'resolve_real_ip', 'auto_interval_seconds', 'auto_tolerance_ms', 'urltest_url', 'udp_over_tcp', 'udp_over_tcp_version', 'urltest_fallbacks', 'urltest_download_check', 'urltest_download_url', 'site_checks'}
+        allowed = required | {'pools', 'pool', 'interface', 'resolver', 'source_interfaces', 'ports', 'networks', 'id', 'enabled', 'mixed_proxy', 'outbound_config', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips', 'resolve_real_ip', 'auto_interval_seconds', 'auto_tolerance_ms', 'urltest_url', 'udp_over_tcp', 'udp_over_tcp_version', 'urltest_fallbacks', 'urltest_download_check', 'urltest_download_url', 'site_checks'}
         if not isinstance(section, dict) or required - set(section) or set(section) - allowed:
             raise AtlasError('Некорректная секция маршрутизации')
         section = dict(section)
@@ -1157,6 +1157,13 @@ def validate_settings(data):
         names.add(name.casefold())
         if section['policy'] not in ('proxy', 'direct', 'exclude', 'block', 'interface'):
             raise AtlasError('Секция может использовать proxy, direct, exclude, block или VPN-интерфейс')
+        pools=section.get('pools')
+        if pools is not None:
+            if not isinstance(pools,list) or len(pools)>64 or any(not isinstance(x,str) or not re.fullmatch('[a-f0-9]{16}',x) for x in pools):
+                raise AtlasError('Выберите корректные подписки секции')
+            pools=list(dict.fromkeys(pools))
+            if section['policy']!='proxy' or section['pool'] or section.get('outbound_config'):
+                raise AtlasError('Несколько подписок используются только с обычным прокси секции')
         pool = section['pool']
         if not isinstance(pool, str) or (pool and not re.fullmatch('[a-f0-9]{16}', pool)):
             raise AtlasError('Некорректный ID пула подписки секции')
@@ -1177,7 +1184,7 @@ def validate_settings(data):
             raise AtlasError('DNS-сервер секции требует домен и политику маршрутизации')
         if pool and section['policy'] != 'proxy':
             raise AtlasError('Пул подписки можно задать только для политики proxy')
-        normalized = {'name': name, 'policy': section['policy'], 'pool': pool, 'interface': interface, 'resolver': resolver}
+        normalized = {'name': name, 'policy': section['policy'], 'pool': pool, 'pools': pools, 'interface': interface, 'resolver': resolver}
         normalized.update({key:section[key] for key in ('resolve_real_ip','auto_interval_seconds','auto_tolerance_ms','urltest_url','udp_over_tcp','udp_over_tcp_version','urltest_fallbacks','urltest_download_check','urltest_download_url','site_checks')})
         if type(section['enabled']) is not bool or not isinstance(section['id'], str) or not re.fullmatch('[a-f0-9]{16}', section['id']):
             raise AtlasError('Некорректный ID или флаг секции')
@@ -1485,8 +1492,9 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             outs.extend(extra)
         else:
             target = (pool_tags[section['pool']] if section['pool'] else 'proxy') if section['policy'] == 'proxy' else interface_tags[section['interface']] if section['policy'] == 'interface' else 'direct'
-            if section['policy']=='proxy' and (section.get('site_checks') or section['urltest_fallbacks'] or section['urltest_download_check']!='default' or any(section[k] is not None if k!='urltest_url' else bool(section[k]) for k in ('auto_interval_seconds','auto_tolerance_ms','urltest_url')) or any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version'))):
-                members=[tag for tag in tags if not section['pool'] or tag.startswith(section['pool'])]
+            if section['policy']=='proxy' and (section.get('pools') is not None or section.get('site_checks') or section['urltest_fallbacks'] or section['urltest_download_check']!='default' or any(section[k] is not None if k!='urltest_url' else bool(section[k]) for k in ('auto_interval_seconds','auto_tolerance_ms','urltest_url')) or any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version'))):
+                members=[tag for tag in tags if (not section.get('pools') or tag[:16] in section['pools']) and (not section['pool'] or tag.startswith(section['pool']))]
+                if not members:raise AtlasError('В выбранных подписках секции нет допущенных профилей')
                 if any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version')):
                     private=[]
                     for tag in members:
@@ -1530,16 +1538,14 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             if not section['outbound_config'] and any(x['tag'] == tag for x in outs):
                 managed.add(tag)
         outs.extend({'type':'block','tag':'atlas_guard_'+tag} for tag in sorted(managed))
-        # Guarded selection sends traffic directly through a measured member.
-        # Its URLTest must keep measuring even without traffic through the group.
-        # Only opt in on engines advertising this JSON extension.
-        if 'urltest.background' in (features if features is not None else engine_features.capabilities()):
-            from launch_cache import managed_auto
-            automatic = {managed_auto(tag) for tag in managed
-                         if tag not in settings['section_choices'] and (tag!='proxy' or settings['selected']=='auto')}
-            for outbound in outs:
-                if outbound['tag'] in automatic and outbound['type']=='urltest':
-                    outbound['background']=True
+    # Native fastest groups also need measurements without traffic.
+    # Background support is explicitly advertised by the Atlas engine.
+    if not probe_node and 'urltest.background' in (features if features is not None else engine_features.capabilities()):
+        generated={'auto'} | {'auto_'+key for key in pool_tags}
+        generated |= {'section_'+x['id']+'_auto' for x in settings['sections'] if not x['outbound_config']}
+        for outbound in outs:
+            if outbound['type']=='urltest' and outbound['tag'] in generated:
+                outbound['background']=True
     try:
         validate_references(outs)
     except ValueError as exc:

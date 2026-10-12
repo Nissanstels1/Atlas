@@ -450,7 +450,7 @@ def automatic_select(current):
         for section in settings['sections']:
             tag='section_'+section['id']+'_control'
             if section['enabled'] and not section['outbound_config'] and tag in proxies and tag not in settings.get('section_choices',{}):
-                members=[n for n in nodes if not section['pool'] or n['key'].startswith(section['pool'])]
+                members=[n for n in nodes if (not section.get('pools') or n['key'][:16] in section['pools']) and (not section['pool'] or n['key'].startswith(section['pool']))]
                 if section['udp_over_tcp'] is not None or section['udp_over_tcp_version'] is not None:
                     members=[dict(n,key='section_'+section['id']+'_'+n['key']) for n in members]
                 policy=dict(settings)
@@ -2423,7 +2423,7 @@ def main():
         return
     if len(sys.argv) > 1 and sys.argv[1] == 'boot-config':
         current = state()
-        config = runtime_config(current) if current['settings'].get('require_verified_countries') else (read_json(stored_config_dir(current['settings']) / 'active.json', None) or runtime_config(current))
+        config = runtime_config(current)  # Rebuild after upgrades; stored JSON can lack current background policy.
         check(config)
         atomic(CONFIG, config)
         return

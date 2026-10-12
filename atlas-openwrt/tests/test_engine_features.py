@@ -87,7 +87,7 @@ class EngineFeatures(unittest.TestCase):
             result=subprocess.run([binary,'check','-c',str(path)],capture_output=True,timeout=15)
         self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
 
-    def test_background_measurements_only_for_guarded_automatic_groups(self):
+    def test_background_measurements_continue_after_manual_selection(self):
         current,keys=self.config();sid='c'*16
         current['settings'].update(max_ping_ms=100,sections=[dict(id=sid,name='private',policy='proxy',domains=['example.com'],cidrs=[],source_ips=[],udp_over_tcp=True)])
         with mock.patch.object(engine_features,'capabilities',return_value=FEATURES+['urltest.background']):cfg=core.make_config(current)
@@ -98,16 +98,16 @@ class EngineFeatures(unittest.TestCase):
         current['settings']['section_choices']={'section_'+sid+'_control':'section_'+sid+'_'+keys[0]}
         with mock.patch.object(engine_features,'capabilities',return_value=FEATURES+['urltest.background']):cfg=core.make_config(current)
         groups={x['tag']:x for x in cfg['outbounds'] if x['type']=='urltest'}
-        self.assertNotIn('background',groups['auto'])
-        self.assertNotIn('background',groups['section_'+sid+'_auto'])
+        self.assertTrue(groups['auto']['background'])
+        self.assertTrue(groups['section_'+sid+'_auto']['background'])
 
-    def test_background_extension_is_never_sent_to_stock_or_native_groups(self):
+    def test_background_requires_engine_support_including_native_fastest(self):
         current,_=self.config();current['settings']['max_ping_ms']=100
         with mock.patch.object(engine_features,'capabilities',return_value=[]):cfg=core.make_config(current)
         self.assertFalse(any('background' in x for x in cfg['outbounds']))
         current['settings']['max_ping_ms']=0
         with mock.patch.object(engine_features,'capabilities',return_value=FEATURES+['urltest.background']):cfg=core.make_config(current)
-        self.assertFalse(any('background' in x for x in cfg['outbounds']))
+        self.assertTrue(next(x for x in cfg['outbounds'] if x['tag']=='auto')['background'])
 
     def test_reserve_validation_duplicates_and_urls(self):
         for value in [dict(urltest_fallbacks=['a'*32]*2),dict(urltest_download_check='custom',urltest_download_url='file:///etc/passwd')]:

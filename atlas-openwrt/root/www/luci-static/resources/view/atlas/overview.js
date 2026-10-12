@@ -216,7 +216,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=dense-rows-20261011' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=boot-pools-20261012' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -299,8 +299,9 @@ return view.extend({
             (r.sections || []).forEach(function(section) {
                 var card = node('div', 'at-padded', [node('h4', '', label(section.name))]);
                 section.groups.forEach(function(group) {
-                    var selection = node('select', 'at-input', group.members.map(function(m) { return atlasElement('option', {value:m.tag, selected:m.tag === group.selected}, m.name + (m.delay ? ' · ' + m.delay + ' мс' : '')); }));
-                    card.appendChild(self.field(group.type === 'selector' ? 'Активный сервер' : 'Автоматическая группа', selection, group.shared ? 'Общий пул: выбор изменится во всех использующих его секциях.' : 'Независимый выход секции.'));
+                    var selection = node('select', 'at-input', group.members.map(function(m) { return atlasElement('option', {value:m.tag, selected:m.tag === group.selected}, (m.tag==='auto' || m.tag.indexOf('auto_')===0 || /_auto$/.test(m.tag) ? 'Автоматически — выбирать подходящий профиль' : m.tag==='policy-block' ? 'Защитная блокировка — трафик остановлен' : m.name + (m.delay ? ' · ' + m.delay + ' мс' : ''))); }));
+                    if(group.type==='selector')card.appendChild(self.field('Режим и профиль секции', selection, group.shared ? 'Этот пул общий: ручной выбор влияет на все использующие его секции. Выберите «Автоматически», чтобы разрешить переключение между его профилями.' : 'Выберите «Автоматически» для независимого подбора в этой секции. Конкретное имя закрепляет один профиль вручную.'));
+                    else {var member=group.members.find(function(x){return x.tag===group.selected;});card.appendChild(node('p','at-footnote',label('Результат автовыбора: '+(member ? member.name+(member.delay ? ' · '+member.delay+' мс' : '') : 'ожидается проверка'))));}
                     if (group.type === 'selector') card.appendChild(self.button('Выбрать сервер', function() { return result(api.sectionSelect(section.id, group.tag, selection.value)).then(load); }, 'ghost', self.busy()));
                     else selection.disabled = true;
                 });
@@ -685,7 +686,15 @@ return view.extend({
             var name = node('input', 'at-input at-section-name', [], { value: original.name || '', maxlength: 48 });
             var enabled = node('input', '', [], { type: 'checkbox', checked: original.enabled !== false });
             var policy = node('select', 'at-input at-section-policy', ['proxy','direct','exclude','block','interface'].map(function(x) { return atlasElement('option', { value: x, selected: x === (original.policy || 'proxy') }, {proxy:'Прокси',direct:'Напрямую',exclude:'Исключение',block:'Блокировать',interface:'VPN-интерфейс'}[x]); }));
-            var pool = node('select', 'at-input at-section-pool', [atlasElement('option', { value: '', selected: !original.pool }, 'Общий пул / JSON outbound')].concat((self.data.subscriptions || []).filter(function(x) { return x.enabled; }).map(function(x) { return atlasElement('option', { value: x.id, selected: original.pool === x.id }, x.name); })));
+            var pool=node('select','at-input at-section-pool',[
+                atlasElement('option',{value:'all',selected:Array.isArray(original.pools) && !original.pools.length},'Все подписки — независимый автовыбор секции'),
+                atlasElement('option',{value:'multiple',selected:Array.isArray(original.pools) && !!original.pools.length},'Несколько выбранных подписок'),
+                atlasElement('option',{value:'',selected:!Array.isArray(original.pools) && !original.pool},'Общий пул — общий выбор для секций')
+            ].concat((self.data.subscriptions || []).filter(function(x){return x.enabled;}).map(function(x){return atlasElement('option',{value:x.id,selected:original.pool===x.id},x.name);}))); 
+            var poolChecks=(self.data.subscriptions || []).filter(function(x){return x.enabled;}).map(function(x){return {id:x.id,input:node('input','',[],{type:'checkbox',checked:(original.pools || []).indexOf(x.id)>=0}),name:x.name};});
+            var poolChoices=node('div','at-pool-choices',poolChecks.map(function(x){return node('label','at-checkbox',[x.input,label(x.name)]);}));
+            function poolVisibility(){poolChoices.hidden=pool.value!=='multiple';}pool.addEventListener('change',poolVisibility);poolVisibility();
+
             var iface = node('input', 'at-input at-section-interface', [], { value: original.interface || '', placeholder: 'wg0' });
             var resolver = node('input', 'at-input at-section-resolver', [], { value: original.resolver || '', placeholder: 'https://dns.example/dns-query' });
             var resolveIp = node('select','at-input at-section-resolve-ip',[atlasElement('option',{value:'inherit',selected:original.resolve_real_ip == null},'Наследовать общую настройку'),atlasElement('option',{value:'on',selected:original.resolve_real_ip === true},'Включить для этой секции'),atlasElement('option',{value:'off',selected:original.resolve_real_ip === false},'Выключить для этой секции')]);
@@ -721,7 +730,7 @@ return view.extend({
             var sourceEditor=node('section','at-section-sources-editor',[node('h3','',label('Списки этой секции')),node('p','at-footnote',label('Все добавленные здесь списки используют подключение этой секции. Ссылка — файл в интернете; file:/// — существующий файл на роутере. Пустой список ничего не добавляет. Сохранённый адрес с /[saved] оставьте без изменений.')),self.field('Готовый список сайтов',catalogue),self.button('Добавить выбранный список',function(){addSource('srs','https://github.com/itdoginfo/allow-domains/releases/latest/download/'+catalogue.value+'.srs',catalogue.options[catalogue.selectedIndex].textContent);},'ghost'),listHolder,node('div','at-actions',[self.button('+ Внешний список доменов',function(){addSource('domains');},'ghost'),self.button('+ Внешний список IP / подсетей',function(){addSource('cidrs');},'ghost'),self.button('+ Локальный файл на роутере',function(){addSource('auto','file:///etc/atlas/');},'ghost')])]);
             var msg = node('p', 'at-inline-error');
             ui.showModal(original.name ? 'Секция «'+original.name+'»' : 'Новая секция', [self.sectionLayout(node('div', 'at-modal', [
-                self.field('Название', name), node('label', 'at-checkbox', [enabled, label('Группа включена')]), self.field('Действие', policy), self.field('Подключение для группы', pool), sourceEditor, self.field('Исходящий VPN-интерфейс', iface),
+                self.field('Название', name), node('label', 'at-checkbox', [enabled, label('Группа включена')]), self.field('Действие', policy), self.field('Подключение для группы', pool), poolChoices, sourceEditor, self.field('Исходящий VPN-интерфейс', iface),
                 node('div', 'at-grid-2', [self.field('Домены', fields.domains), self.field('IP назначения / CIDR', fields.cidrs), self.field('IP устройств / CIDR', fields.source_ips), self.field('Входящие интерфейсы', fields.source_interfaces), self.field('Порты: 443,10000-20000', fields.ports), self.field('Транспорт: tcp,udp', fields.networks)]),
                 self.field('DNS resolver для доменов', resolver), self.field('Разрешение реального IP',resolveIp),
                 node('p','at-footnote',label('Отдельный DNS применяется к доменам секции независимо от портов и TCP/UDP соединений. Устройства и входящие интерфейсы учитываются, когда DNS-запрос сохраняет эти признаки. DNS-запрос не содержит порт будущего соединения.')),
@@ -738,7 +747,8 @@ return view.extend({
                     var value = JSON.parse(json.value || '[]');
                     if (value && !Array.isArray(value) && value.outbounds && Object.keys(value).length === 1) value = value.outbounds;
                     if (!Array.isArray(value)) value = [value];
-                    var updated = Object.assign({}, original, { id:original.id || self.newGroupId(), name: name.value.trim(), enabled: enabled.checked, policy: policy.value, pool: pool.value, interface: iface.value.trim(), resolver: resolver.value.trim(), outbound_config: value, mixed_proxy: {enabled:mixed.checked,listen:bind.value.trim(),port:Number(port.value),username:username.value.trim(),password:password.value || listener.password || ''} });
+                    if(pool.value==='multiple' && !poolChecks.some(function(x){return x.input.checked;}))throw new Error('Выберите хотя бы одну подписку или режим «Все подписки»');
+                    var updated = Object.assign({}, original, { id:original.id || self.newGroupId(), name: name.value.trim(), enabled: enabled.checked, policy: policy.value, pool: ['all','multiple'].indexOf(pool.value)>=0 ? '' : pool.value, pools:pool.value==='all' ? [] : pool.value==='multiple' ? poolChecks.filter(function(x){return x.input.checked;}).map(function(x){return x.id;}) : null, interface: iface.value.trim(), resolver: resolver.value.trim(), outbound_config: value, mixed_proxy: {enabled:mixed.checked,listen:bind.value.trim(),port:Number(port.value),username:username.value.trim(),password:password.value || listener.password || ''} });
                     updated.resolve_real_ip=resolveIp.value==='inherit' ? null : resolveIp.value==='on';
                     updated.udp_over_tcp=sectionUot.value==='inherit' ? null : sectionUot.value==='on';
                     updated.udp_over_tcp_version=sectionUotVersion.value==='inherit' ? null : Number(sectionUotVersion.value);
@@ -926,7 +936,7 @@ return view.extend({
     settingsPage: function() {
         var self = this, d = self.data;
         var interval = node('input', 'at-input', [], { type: 'number', min: 1, max: 168, value: d.settings.interval_hours });
-        var maxActive = node('select', 'at-input at-max-active', [128,256,512,1024,0].map(function(n) { return atlasElement('option', { value: String(n), selected: Number(d.settings.max_active_nodes == null ? 512 : d.settings.max_active_nodes) === n }, n ? String(n) + ' профилей' : 'Без лимита активного пула'); }));
+        var maxActive = node('select', 'at-input at-max-active', [128,256,512,1024,2048,4096,0].map(function(n) { return atlasElement('option', { value: String(n), selected: Number(d.settings.max_active_nodes == null ? 512 : d.settings.max_active_nodes) === n }, n ? String(n) + ' профилей' : 'Без лимита активного пула'); }));
         var dnsFilter = node('select', 'at-input', [atlasElement('option', { value: 'cloudflare', selected: d.settings.dns_filter === 'cloudflare' }, 'Cloudflare DoH'), atlasElement('option', { value: 'adguard', selected: d.settings.dns_filter === 'adguard' }, 'AdGuard DoH — реклама и трекеры'), atlasElement('option', { value: 'custom', selected: d.settings.dns_filter === 'custom' }, 'Свой DNS')]);
         var yacdEnabled = node('input','at-yacd-enabled',[],{type:'checkbox',checked:!!d.settings.yacd_enabled});
         var yacdWan = node('input','at-yacd-wan',[],{type:'checkbox',checked:!!d.settings.yacd_wan});
