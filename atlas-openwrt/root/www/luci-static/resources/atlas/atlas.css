@@ -107,4 +107,14 @@
 .at-settings-advanced{margin:16px 0;padding:12px;border:1px solid #7773;border-radius:10px}
 .at-settings-advanced>summary{cursor:pointer;font-weight:600}
 .at-settings-fields{padding-top:12px}
+.at-wizard-category{border:1px solid #8884;border-radius:8px;margin:10px 0;padding:10px}
+.at-wizard-category>summary{cursor:pointer;font-weight:600;font-size:14px}
+.at-wizard-category[open]>summary{margin-bottom:10px}
+.at-wizard-category .at-checkbox-field{margin:4px 0}
+.at-help{margin-top:3px!important;border-left:0!important;padding-left:0!important}
+.at-help>summary{font-size:12px;cursor:pointer;width:fit-content}
+.at-help[open]{padding:8px!important;border:1px solid #8884;border-radius:7px}
+.at-help-current:empty{display:none}
+.at-modal .at-footnote,.at-modal .at-help,.at-modal .at-help p,.at-modal .at-field small{color:inherit!important}
+.at-modal .at-footnote,.at-modal .at-field small{opacity:.85}
 @media(max-width:650px){.atlas .at-section-summary .at-actions>.at-btn{flex:0 1 auto;width:auto;min-width:0}}

@@ -1097,7 +1097,7 @@ def validate_settings(data):
     sections, names = [], set()
     for section in result['sections']:
         required = {'name', 'policy', 'domains', 'cidrs', 'source_ips'}
-        allowed = required | {'pools', 'pool', 'interface', 'resolver', 'source_interfaces', 'ports', 'networks', 'id', 'enabled', 'mixed_proxy', 'outbound_config', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips', 'resolve_real_ip', 'auto_interval_seconds', 'auto_tolerance_ms', 'urltest_url', 'udp_over_tcp', 'udp_over_tcp_version', 'urltest_fallbacks', 'urltest_download_check', 'urltest_download_url', 'site_checks'}
+        allowed = required | {'routed_source_ips', 'pools', 'pool', 'interface', 'resolver', 'source_interfaces', 'ports', 'networks', 'id', 'enabled', 'mixed_proxy', 'outbound_config', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips', 'resolve_real_ip', 'auto_interval_seconds', 'auto_tolerance_ms', 'urltest_url', 'udp_over_tcp', 'udp_over_tcp_version', 'urltest_fallbacks', 'urltest_download_check', 'urltest_download_url', 'site_checks'}
         if not isinstance(section, dict) or required - set(section) or set(section) - allowed:
             raise AtlasError('Некорректная секция маршрутизации')
         section = dict(section)
@@ -1150,7 +1150,7 @@ def validate_settings(data):
         section.setdefault('id', hashlib.sha256(section['name'].encode()).hexdigest()[:16])
         section.setdefault('mixed_proxy', {})
         section.setdefault('outbound_config', [])
-        for key in ('exclude_domains','exclude_cidrs','exclude_source_ips'):section.setdefault(key,[])
+        for key in ('routed_source_ips','exclude_domains','exclude_cidrs','exclude_source_ips'):section.setdefault(key,[])
         name = text(section['name'].strip(), 48)
         if not name or name.casefold() in names:
             raise AtlasError('Названия секций должны быть непустыми и уникальными')
@@ -1259,7 +1259,7 @@ def validate_settings(data):
         if not isinstance(networks, list) or len(networks) > 2 or any(value not in ('tcp', 'udp') for value in networks):
             raise AtlasError('Транспорт секции: tcp, udp или оба')
         normalized['networks'] = list(dict.fromkeys(networks))
-        for key in ('domains', 'cidrs', 'source_ips', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips'):
+        for key in ('domains', 'cidrs', 'source_ips', 'routed_source_ips', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips'):
             values = section[key]
             if not isinstance(values, list):
                 raise AtlasError('Правила секции должны быть массивом')
@@ -1280,7 +1280,7 @@ def validate_settings(data):
                     seen_values.add(item)
                     out.append(item)
             normalized[key] = out
-        if normalized['enabled'] and not listener['enabled'] and not normalized['outbound_config'] and not any(x.get('section') == normalized['id'] for x in result['remote_lists']) and result['fetch_lists_section'] != normalized['id'] and not any(normalized[key] for key in ('domains', 'cidrs', 'source_ips', 'source_interfaces', 'ports', 'networks')):
+        if normalized['enabled'] and not listener['enabled'] and not normalized['outbound_config'] and not any(x.get('section') == normalized['id'] for x in result['remote_lists']) and result['fetch_lists_section'] != normalized['id'] and not any(normalized[key] for key in ('domains', 'cidrs', 'source_ips', 'routed_source_ips', 'source_interfaces', 'ports', 'networks')):
             raise AtlasError('Добавьте в секцию хотя бы одно правило')
         sections.append(normalized)
     result['sections'] = sections
@@ -1627,6 +1627,11 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         rules.append({'domain_suffix': KNOWN_DOH_DOMAINS, 'action': 'reject'})
     exclusion_insert_at = len(rules)
     for section in settings['sections']:
+        if section['routed_source_ips']:
+            full_match=section_match(section,{'source_ip_cidr':section['routed_source_ips']})
+            if section['policy']=='exclude':priority_exclusions.append(dict(full_match,action='route',outbound='direct'))
+            elif section['policy']=='block':rules.append(register_section_rule(dict(full_match,action='reject'),section))
+            else:rules.append(register_section_rule(dict(full_match,action='route',outbound=section_targets[section['id']]),section))
         match = {}
         if section['domains']:
             match['domain_suffix'] = section['domains']
