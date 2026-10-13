@@ -115,6 +115,13 @@
 .at-help>summary{font-size:12px;cursor:pointer;width:fit-content}
 .at-help[open]{padding:8px!important;border:1px solid #8884;border-radius:7px}
 .at-help-current:empty{display:none}
+.at-help-alternative:empty{display:none}
+.at-library-rows{display:grid;gap:10px;margin:12px 0}
+.at-library-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:12px;border:1px solid #8884;border-radius:8px}
+.at-library-row>strong,.at-library-row>small{overflow-wrap:anywhere;min-width:0}
+.at-library-row>small{grid-column:1;font-size:12px;opacity:.8}
+.at-library-row>.at-actions{grid-column:2;grid-row:1 / span 2;margin:0}
+@media(max-width:650px){.at-library-row{grid-template-columns:minmax(0,1fr)}.at-library-row>.at-actions{grid-column:1;grid-row:auto;flex-wrap:wrap}}
 .at-modal .at-footnote,.at-modal .at-help,.at-modal .at-help p,.at-modal .at-field small{color:inherit!important}
 .at-modal .at-footnote,.at-modal .at-field small{opacity:.85}
 @media(max-width:650px){.atlas .at-section-summary .at-actions>.at-btn{flex:0 1 auto;width:auto;min-width:0}}

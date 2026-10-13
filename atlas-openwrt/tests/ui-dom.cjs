@@ -4,7 +4,7 @@ class N {
  constructor(tag,text=''){this.tag=tag;this.data=text;this.children=[];this.attributes={};this.listeners={};this.value='';this.checked=false;}
  appendChild(c){this.children.push(c);return c;}
  replaceChildren(...c){this.children=c;}
- setAttribute(k,v){this.attributes[k]=String(v);if(k==='value')this.value=v;if(['disabled','checked','selected','readonly'].includes(k))this[k]=true;}
+ setAttribute(k,v){this.attributes[k]=String(v);if(k==='value')this.value=v;if(k==='type')this.type=v;if(['disabled','checked','selected','readonly'].includes(k))this[k]=true;}
  addEventListener(k,v){const previous=this.listeners[k];this.listeners[k]=previous ? function(event){previous(event);v(event);} : v;}
  querySelectorAll(tag){return this.children.flatMap(c=>[...(c.tag===tag ? [c] : []),...c.querySelectorAll(tag)]);}
  get textContent(){return this.data+this.children.map(c=>c.textContent||'').join('');}
@@ -16,7 +16,7 @@ function E(t,a={},c=[]){const n=new N(t);for(const [k,v] of Object.entries(a)){i
 const initial={ok:true,version:'0.12.0',running:false,engine:'sing-box 1.14.1',job:{},applied:{},privacy:{checks:[{id:'dns_hijack',ok:true,label:'DNS проверяется'}],notice:'Аудит конфигурации'},privacy_egress:{status:'done',same_exit:false},settings:{mode:'rules',selected:'auto',domains:[],cidrs:[],bypass_domains:[],bypass_cidrs:[],blocked_domains:[],interval_hours:12,dns_filter:'cloudflare',fakeip:false,fakeip_ttl_seconds:60,kill_switch:false,remote_lists:[]},subscriptions:[],nodes:[],checks:{}};
 let failWizardApply=false;
 const calls=[];let data=structuredClone(initial),modal=null;
-const rpc={declare:({method})=>(...args)=>{calls.push({method,args});if(method==='action'&&args[0]==='apply'&&failWizardApply){failWizardApply=false;return Promise.resolve({ok:false,error:'Retry apply test'});}if(method==='import_profiles'&&args[0]==='Wizard URI'){const id='e'.repeat(16);data.subscriptions.push({id,name:args[0],enabled:true,count:1,source:'local'});data.nodes.push({key:'e'.repeat(32),name:'Imported URI',subscription:args[0],type:'vless',eligible:true});return Promise.resolve({ok:true,id,count:1});}if(method==='save_subscription'&&args[1]==='Wizard HTTPS'&&!args[0])data.subscriptions.push({id:'f'.repeat(16),name:args[1],enabled:true,count:0});if(method==='action'&&args[0]==='refresh'&&args[1]==='f'.repeat(16)){data.nodes.push({key:'f'.repeat(32),name:'Downloaded',subscription:'Wizard HTTPS',type:'vless',eligible:true});data.subscriptions.find(x=>x.id==='f'.repeat(16)).count=1;}if(method==='status')return Promise.resolve(structuredClone(data));if(method==='monitor')return Promise.resolve({ok:true,available:true,connections:[],rules:[],memory:{},upload_total:0,download_total:0});if(method==='save_settings')data.settings=args[0];if(method==='import_rules')return Promise.resolve({ok:true,domains:2,cidrs:1});if(method==='import_subscriptions')return Promise.resolve({ok:true,added:1,duplicates:1,errors:0,items:[{line:1,name:'provider.example',status:'added'},{line:2,name:'provider.example',status:'duplicate'}]});return Promise.resolve({ok:true});}};
+const rpc={declare:({method})=>(...args)=>{calls.push({method,args});if(method==='action'&&args[0]==='apply'&&failWizardApply){failWizardApply=false;return Promise.resolve({ok:false,error:'Retry apply test'});}if(method==='import_profiles'&&args[0]==='Wizard URI'){const id='e'.repeat(16);data.subscriptions.push({id,name:args[0],enabled:true,count:1,source:'local'});data.nodes.push({key:'e'.repeat(32),name:'Imported URI',subscription:args[0],type:'vless',eligible:true});return Promise.resolve({ok:true,id,count:1});}if(method==='save_subscription'&&args[1]==='Wizard HTTPS'&&!args[0])data.subscriptions.push({id:'f'.repeat(16),name:args[1],enabled:true,count:0});if(method==='action'&&args[0]==='refresh'&&args[1]==='f'.repeat(16)){data.nodes.push({key:'f'.repeat(32),name:'Downloaded',subscription:'Wizard HTTPS',type:'vless',eligible:true});data.subscriptions.find(x=>x.id==='f'.repeat(16)).count=1;}if(method==='status')return Promise.resolve(structuredClone(data));if(method==='monitor')return Promise.resolve({ok:true,available:true,connections:[],rules:[],memory:{},upload_total:0,download_total:0});if(method==='save_settings')data.settings=Object.keys(args[0]).length===1&&args[0].list_catalogue ? Object.assign({},data.settings,args[0]) : args[0];if(method==='import_rules')return Promise.resolve({ok:true,domains:2,cidrs:1});if(method==='import_subscriptions')return Promise.resolve({ok:true,added:1,duplicates:1,errors:0,items:[{line:1,name:'provider.example',status:'added'},{line:2,name:'provider.example',status:'duplicate'}]});return Promise.resolve({ok:true});}};
 const ui={addNotification(){},showModal(t,c){modal=E('div',{},c)},hideModal(){modal=null}};
 const L={hasViewPermission:()=>true,resource:s=>s};
 let pollCallback;
@@ -85,10 +85,16 @@ const all=n=>[n,...n.children.flatMap(all)];
  app.navigate('nodes');const geoButton=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Проверить IP выхода');geoButton.listeners.click({currentTarget:geoButton});await new Promise(r=>setTimeout(r,0));
  assert(calls.some(c=>c.method==='action'&&c.args[0]==='geo_check'&&c.args[1]==='a'.repeat(32)),'Exit country check targeted the wrong node');
  app.deleteDialog(data.subscriptions[0]);assert(modal.textContent.includes('Удалить'),'Delete confirmation');
- app.navigate('routing');const routeDomains=all(app.root).find(n=>n.tag==='textarea'&&(n.attributes.class||'').includes('at-route-domains'));routeDomains.value='example.org\nexample.net';
+ app.navigate('routing');
+ const directCard=all(app.root).find(n=>(n.attributes.class||'').includes('at-global-direct'));assert(directCard&&directCard.textContent.includes('Всегда напрямую — для всех секций'),'Global exceptions need their own clear block');
+ assert(all(directCard).filter(n=>n.tag==='textarea').length===3,'Global site/network/device exceptions must each have exactly one field');
+ const directDomain=all(directCard).find(n=>(n.attributes.class||'').includes('at-route-bypass_domains'));directDomain.value='bank.example';
+ const directNet=all(directCard).find(n=>(n.attributes.class||'').includes('at-route-bypass_cidrs'));directNet.value='203.0.113.0/24';
+ const directDevice=all(directCard).find(n=>(n.attributes.class||'').includes('at-route-routing_excluded_ips'));directDevice.value='192.168.34.25';
+ const routeDomains=all(app.root).find(n=>n.tag==='textarea'&&(n.attributes.class||'').includes('at-route-domains'));routeDomains.value='example.org\nexample.net';
  const button=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Сохранить правила');button.listeners.click({currentTarget:button});
  await new Promise(r=>setTimeout(r,0));
- const saved=calls.find(c=>c.method==='save_settings');assert(saved.args[0].domains.length===2,'Save rules did not call RPC');
+ const saved=calls.find(c=>c.method==='save_settings');assert(saved.args[0].domains.length===2,'Save rules did not call RPC');assert(saved.args[0].bypass_domains[0]==='bank.example'&&saved.args[0].bypass_cidrs[0]==='203.0.113.0/24'&&saved.args[0].routing_excluded_ips[0]==='192.168.34.25','Global bypass fields saved to the wrong routing scope');
  app.navigate('privacy');assert(app.root.textContent.includes('DNS проверяется'),'Privacy audit view missing');
  assert(app.root.textContent.includes('Функциональная самопроверка'),'Router self-test view missing');
  assert(app.root.textContent.includes('Запустить тест')&&app.root.textContent.includes('api.ipify.org'),'External privacy test disclosure missing');
@@ -107,19 +113,19 @@ const all=n=>[n,...n.children.flatMap(all)];
  const community=all(app.root).find(n=>n.tag==='select'&&n.attributes.class==='at-input at-community-catalog');
  const communityPolicy=all(app.root).find(n=>n.tag==='select'&&n.attributes.class==='at-input at-community-policy');
  const communityIface=all(app.root).find(n=>n.tag==='input'&&n.attributes.class==='at-input at-community-interface');
- assert(community&&communityPolicy&&communityIface,'Community SRS catalog controls missing');
- community.value='telegram';communityPolicy.value='interface';communityIface.value='wg0';
- const addCommunity=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Добавить community list');addCommunity.listeners.click({currentTarget:addCommunity});await new Promise(r=>setTimeout(r,0));
+ assert(community&&communityPolicy,'Community SRS catalog controls missing');
+ community.value='telegram';communityPolicy.value='exclude';
+ const addCommunity=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Добавить список в общие правила');addCommunity.listeners.click({currentTarget:addCommunity});await new Promise(r=>setTimeout(r,0));
  const communityText=all(app.root).find(n=>n.tag==='textarea'&&(n.attributes.placeholder||'').startsWith('EasyList')).value;
- assert(communityText.includes('https://github.com/itdoginfo/allow-domains/releases/latest/download/telegram.srs | interface | srs | on')&&communityText.trim().endsWith('| wg0'),'Community SRS URL/interface row not added');
+ assert(communityText.includes('https://github.com/itdoginfo/allow-domains/releases/latest/download/telegram.srs | exclude | srs | on'),'Community SRS URL/interface row not added');
  const saveCommunity=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Сохранить правила');saveCommunity.listeners.click({currentTarget:saveCommunity});await new Promise(r=>setTimeout(r,0));
  const communitySave=calls.filter(c=>c.method==='save_settings').at(-1).args[0].remote_lists[1];
- assert(communitySave.policy==='interface'&&communitySave.interface==='wg0'&&communitySave.format==='srs','Community list route policy did not serialize');
+ assert(communitySave.policy==='exclude'&&communitySave.interface===''&&communitySave.format==='srs','Community list route policy did not serialize');
  const proxyUpdate=all(app.root).find(n=>n.tag==='input'&&n.attributes.class==='at-fetch-lists-proxy');
  assert(proxyUpdate,'Proxy-only list update option missing');proxyUpdate.checked=true;
  const proxySave=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Сохранить правила');proxySave.listeners.click({currentTarget:proxySave});await new Promise(r=>setTimeout(r,0));
  const proxySettings=calls.filter(c=>c.method==='save_settings').at(-1).args[0];
- assert(proxySettings.fetch_lists_via_proxy===true&&proxySettings.remote_lists[1].interface==='wg0','Proxy-only list update or interface setting was lost');
+ assert(proxySettings.fetch_lists_via_proxy===true&&proxySettings.remote_lists[1].policy==='exclude','Proxy-only list update or global list scope was lost');
  const sectionBox=all(app.root).find(n=>n.tag==='textarea'&&(n.attributes.placeholder||'').startsWith('Работа | proxy'));
  sectionBox.value='VPN intranet | interface | intranet.example | | | | wg0 | https://dns.example/dns-query | br-lan\nExclude | exclude | local.example | | | | |\nPorts | block | | | 192.168.1.25 | | | | | 443,10000-20000 | udp';
  const saveRules=all(app.root).find(n=>n.tag==='button'&&n.textContent==='Сохранить правила');saveRules.listeners.click({currentTarget:saveRules});await new Promise(r=>setTimeout(r,0));
@@ -148,7 +154,7 @@ const all=n=>[n,...n.children.flatMap(all)];
  app.navigate('routing');
  const file=all(app.root).find(n=>n.tag==='input'&&n.attributes.type==='file');assert(file,'Local rules file picker missing');
  file.files=[{size:26,content:'ads.example\n203.0.113.0/24\n'}];file.listeners.change({target:file});await new Promise(r=>setTimeout(r,0));
- const imported=calls.filter(c=>c.method==='import_rules').at(-1);assert(imported&&imported.args[1]==='proxy'&&Buffer.from(imported.args[0],'base64').toString('utf8').includes('ads.example'),'Local file import was not sent to the authenticated router RPC');
+ const imported=calls.filter(c=>c.method==='import_rules').at(-1);assert(imported&&imported.args[1]==='direct'&&Buffer.from(imported.args[0],'base64').toString('utf8').includes('ads.example'),'Local file import was not sent to the authenticated router RPC');
  data.runtime={available:true,selected:data.nodes[0].key,name:'Actual engine choice',automatic:true,candidate_count:1};app.data=data;app.navigate('nodes');
  assert(app.root.textContent.includes('Actual engine choice'),'Actual runtime selection not displayed');
  data.running=true;app.data=data;app.navigate('nodes');const choose=all(app.root).find(n=>n.tag==='button'&&n.textContent==='В секцию');const beforeChoose=calls.length;choose.listeners.click({currentTarget:choose});await new Promise(r=>setTimeout(r,0));
@@ -245,6 +251,31 @@ const all=n=>[n,...n.children.flatMap(all)];
  assert(calls.filter(c=>c.method==='monitor').length===beforeMonitor+1,'Monitor request was duplicated');
  await app.requestMonitor();
  assert(calls.filter(c=>c.method==='monitor').length===beforeMonitor+2,'Settled request must release monitor gate');
+ const libraryClick=async n=>{n.listeners.click({currentTarget:n});await new Promise(r=>setTimeout(r,0));};
+ data.job={};app.data=data;app.navigate('routing');
+ app.listCatalogueDialog();
+ const libraryKind=all(modal).find(n=>(n.attributes.class||'').includes('at-library-kind'));libraryKind.value='text';libraryKind.listeners.change();
+ const libraryName=all(modal).find(n=>(n.attributes.class||'').includes('at-library-name'));libraryName.value='My handwritten list';libraryName.listeners.input();
+ const libraryContent=all(modal).find(n=>(n.attributes.class||'').includes('at-library-content'));libraryContent.value='example.org\nexample.net';libraryContent.listeners.input();
+ const addLibrary=all(modal).find(n=>n.tag==='button'&&n.textContent==='Добавить в библиотеку');await libraryClick(addLibrary);
+ assert(modal.textContent.includes('My handwritten list'),'User source missing from library form');
+ const saveLibrary=all(modal).find(n=>n.tag==='button'&&n.textContent==='Сохранить библиотеку');await libraryClick(saveLibrary);
+ const libraryCall=calls.filter(c=>c.method==='save_settings').at(-1).args[0];assert(Object.keys(libraryCall).join(',')==='list_catalogue','Library save must not submit routing changes');
+ assert(libraryCall.list_catalogue[0].content.includes('example.net'),'Handwritten source content lost');
+ const template=libraryCall.list_catalogue[0];
+ const immediateGlobalPicker=all(app.root).find(n=>n.tag==='select'&&(n.attributes.class||'').includes('at-community-catalog'));immediateGlobalPicker.value='my_'+template.id;
+ await libraryClick(all(app.root).find(n=>n.tag==='button'&&n.textContent==='Добавить список в общие правила'));
+ assert(all(app.root).find(n=>(n.attributes.class||'').includes('at-pending-global-lists')).textContent.includes(template.name),'Adding a freshly saved source must work without reloading the routing form');
+ let copiedSources=[];app.sectionDialog(sampleSection,()=>{}, {get:()=>[],set:(id,items)=>{copiedSources=items;},choice:()=>undefined});
+ const sourcePicker=all(modal).find(n=>n.tag==='select'&&n.attributes['aria-label']==='Списки сообщества и мои списки');assert(sourcePicker,'Section source picker missing');
+ sourcePicker.value='my_'+template.id;await libraryClick(all(modal).find(n=>n.tag==='button'&&n.textContent==='Добавить выбранный список'));
+ assert(modal.textContent.includes('Свой текст из библиотеки'),'Inline library copy should not request an empty URL');
+ await libraryClick(all(modal).find(n=>n.tag==='button'&&n.textContent==='Добавить в форму'));
+ assert(copiedSources[0]&&copiedSources[0].source_catalogue_id===template.id,'Library source reference lost in section');
+ app.setupWizard();let next=()=>all(modal).find(n=>n.tag==='button'&&n.textContent==='Далее');await libraryClick(next());
+ const wizardName=all(modal).find(n=>(n.attributes.class||'').includes('at-wizard-name'));wizardName.value='Library wizard';wizardName.listeners.input();await libraryClick(next());
+ assert(modal.textContent.includes('Мои сохранённые списки')&&modal.textContent.includes(template.name),'Library source missing from wizard');ui.hideModal();
+ app.navigate('routing');assert(all(app.root).find(n=>n.tag==='select'&&(n.attributes.class||'').includes('at-community-catalog')).textContent.includes(template.name),'Library source missing from global rules');
  data.job={status:'running',message:'Testing'};app.data=data;app.navigate('overview');
  assert(app.busy(),'Operation not busy');
  console.log('PASS: seven views, connection monitor, privacy audit/self-test, ad-filter/FakeIP TTL, DHCP/DNS and storage controls, local list import, fail-closed control, community SRS catalogue/interface routes, split DNS/source-interface sections, text escaping, subscription dialog/provider headers, batch import and per-row report, deletion confirmation, rule save RPC, staged independent section selection, country allow/deny, ping strategy/thresholds, actual runtime choice, busy state.');

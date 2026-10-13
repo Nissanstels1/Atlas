@@ -140,9 +140,52 @@ def locked(block=False):
     return named_lock('lock', block)
 
 
+def export_catalogue_files(current):
+    entries={};texts={};total=0
+    for item in current['settings']['remote_lists']:
+        path=DATA/'catalogue-files'/(item['id']+'.txt')
+        if item['url']!=path.as_uri():continue
+        body=local_rule_bytes(item['url'],max_bytes=1024*1024)
+        digest=hashlib.sha256(body).hexdigest();entries[item['id']]=digest
+        if digest not in texts:
+            total+=len(body)
+            if total>MAX_BYTES:raise AtlasError('Тексты копий своих списков в резервной копии ограничены 4 МиБ')
+            texts[digest]=body.decode('utf-8')
+    return {'entries':entries,'texts':texts}
+
+
+def catalogue_restore_files(content,restored):
+    payload=json.loads(content).get('catalogue_files',{'entries':{},'texts':{}})
+    if not isinstance(payload,dict) or set(payload)!={'entries','texts'} or not isinstance(payload['entries'],dict) or not isinstance(payload['texts'],dict):raise AtlasError('Некорректные файлы своих списков в копии')
+    sources={item['id']:item for item in restored['settings']['remote_lists']};blobs={};total=0;files={}
+    for digest,text_value in payload['texts'].items():
+        if not isinstance(digest,str) or not isinstance(text_value,str):raise AtlasError('Некорректный текст своего списка в копии')
+        body=text_value.encode('utf-8');total+=len(body)
+        if len(body)>1024*1024 or total>MAX_BYTES or hashlib.sha256(body).hexdigest()!=digest:raise AtlasError('Повреждён или слишком велик свой список в копии')
+        blobs[digest]=body
+    for key,digest in payload['entries'].items():
+        source=sources.get(key)
+        if not source or not isinstance(digest,str) or digest not in blobs:raise AtlasError('Не найден источник своего списка в копии')
+        old=urlsplit(source['url']);old_path=Path(old.path)
+        if old.scheme!='file' or old_path.parent.name!='catalogue-files' or old_path.name!=key+'.txt' or not source.get('catalogue_origin'):raise AtlasError('Недопустимый файл своего списка в копии')
+        parse_rule_list(blobs[digest],source['format'])
+        target=DATA/'catalogue-files'/(key+'.txt');source['url']=target.as_uri();files[target]=blobs[digest]
+    return files
+
+
+def clean_catalogue_files(current):
+    directory=DATA/'catalogue-files'
+    if not directory.is_dir() or directory.is_symlink():return
+    referenced={item.get('url') for item in current['settings'].get('remote_lists',[])}
+    for path in directory.iterdir():
+        if re.fullmatch(r'[a-f0-9]{16}\.txt',path.name) and not path.is_symlink() and path.as_uri() not in referenced:
+            path.unlink(missing_ok=True)
+
+
 def maintain_artifacts(current):
     """Best-effort cleanup under the operation lock, after a successful commit."""
     try:
+        clean_catalogue_files(current)
         result = prune_artifacts(current, DATA, RUN, CONFIG)
         checks = result.pop('checks', None)
         if checks is not None:
@@ -1833,6 +1876,11 @@ def public_status():
     for section in public_settings.get('sections', []):
         section['mixed_proxy'].pop('password', None)
         section['outbound_config_set'] = bool(section.pop('outbound_config', []))
+    for source in public_settings.get('list_catalogue', []):
+        body=source.pop('content','');source['content_set']=bool(body);source['content_lines']=len(body.splitlines()) if body else 0
+        if body:continue
+        parsed=urlsplit(source['url'])
+        source['url']=source['url'] if parsed.scheme=='file' else '%s://%s/[saved]'%(parsed.scheme,parsed.hostname)
     for source in public_settings.get('remote_lists', []):
         parsed = urlsplit(source['url'])
         source['url'] = source['url'] if parsed.scheme == 'file' else '%s://%s/[saved]' % (parsed.scheme, parsed.hostname)
@@ -2007,7 +2055,8 @@ def dispatch(method, args):
             for filename in ('active.json','last-good.json'):
                 atomic(stored_config_dir(current['settings']) / filename,active)
         elif method == 'export_backup':
-            return {'ok': True, 'backup': make_backup(current)}
+            backup=make_backup(current);backup['catalogue_files']=export_catalogue_files(current)
+            return {'ok': True, 'backup': backup}
         elif method == 'diagnostic_report':
             from resources import snapshot
             checks = read_json(RUN / 'checks.json', {})
@@ -2026,6 +2075,7 @@ def dispatch(method, args):
             if service_running():
                 raise AtlasError('Остановите Atlas перед восстановлением резервной копии')
             restored = restore_state(args.get('content', ''))
+            catalogue_files=catalogue_restore_files(args.get('content',''),restored)
             for item in restored['settings']['remote_lists']:
                 if item.get('source_rules') is not None:
                     validate_source_rules(json.dumps(item['source_rules']).encode())
@@ -2054,6 +2104,10 @@ def dispatch(method, args):
                         path=DATA/'rules'/(item['id']+'.json')
                         previous_rule_files[path]=path.read_bytes() if path.exists() else None
                         atomic_bytes(path,json.dumps(item['source_rules']).encode())
+                for path,body in catalogue_files.items():
+                    if path.parent.is_symlink() or path.is_symlink():raise AtlasError('Недопустимая ссылка в хранилище своих списков')
+                    previous_rule_files[path]=path.read_bytes() if path.exists() else None
+                    atomic_bytes(path,body)
                 atomic(STATE, restored)
             except (AtlasError, OSError, subprocess.TimeoutExpired):
                 for path,body in previous_rule_files.items():
@@ -2242,6 +2296,43 @@ def dispatch(method, args):
         elif method == 'save_settings':
             previous = copy.deepcopy(current)
             submitted = copy.deepcopy(args.get('settings', {}))
+            # Library content is read on demand by an administrator. Routine
+            # status polling returns metadata only, never megabytes of text.
+            if set(submitted)=={'catalogue_read'}:
+                key=submitted['catalogue_read']
+                if not isinstance(key,str):raise AtlasError('Некорректный ID своего списка')
+                item=next((x for x in current['settings'].get('list_catalogue',[]) if x['id']==key),None)
+                if not item:raise AtlasError('Мой список не найден')
+                item=copy.deepcopy(item)
+                if item['url'] and not item['url'].startswith('file:///'):
+                    parsed=urlsplit(item['url']);item['url']='%s://%s/[saved]'%(parsed.scheme,parsed.hostname)
+                return {'ok':True,'source':item}
+            catalogue_only=set(submitted)=={'list_catalogue'}
+            if catalogue_only:
+                submitted=dict(copy.deepcopy(current['settings']),list_catalogue=submitted['list_catalogue'])
+            else:
+                # Library edits are metadata-only requests; an older routing
+                # form must not erase sources added while that form was open.
+                submitted['list_catalogue']=copy.deepcopy(current['settings'].get('list_catalogue',[]))
+            old_catalogue={item['id']:item for item in current['settings'].get('list_catalogue',[])}
+            if isinstance(submitted.get('list_catalogue'),list):
+                for item in submitted['list_catalogue']:
+                    if not isinstance(item,dict):continue
+                    preserve_content=item.pop('content_set',False);item.pop('content_lines',None)
+                    if preserve_content and not item.get('content'):
+                        original=old_catalogue.get(item.get('id'))
+                        if not original:raise AtlasError('Текст своего списка не найден')
+                        item['content']=original.get('content','')
+                    if isinstance(item.get('url'),str) and item['url'].endswith('/[saved]'):
+                        original=old_catalogue.get(item.get('id'))
+                        if not original:raise AtlasError('Сохранённый источник списка не найден')
+                        item['url']=original['url']
+            if catalogue_only:
+                current['settings']=validate_settings(submitted)
+                for item in current['settings']['list_catalogue']:
+                    if item.get('content'):parse_rule_list(item['content'].encode('utf-8'),item['format'])
+                atomic(STATE,current)
+                return {'ok':True}
             if not submitted.get('mixed_proxy_password'):
                 submitted['mixed_proxy_password'] = current['settings'].get('mixed_proxy_password', '')
             old_sections = {item['id']: item for item in current['settings']['sections']}
@@ -2261,11 +2352,29 @@ def dispatch(method, args):
                     if isinstance(listener, dict) and not listener.get('password'):
                         listener['password'] = old_section['mixed_proxy'].get('password', '')
                         section['mixed_proxy'] = listener
+            catalogue_files=[]
             old_lists = {item['id']: item for item in current['settings'].get('remote_lists', [])}
             for item in submitted.get('remote_lists', []):
                 if isinstance(item, dict):
+                    catalogue_id=item.pop('source_catalogue_id',None)
+                    if catalogue_id is not None:
+                        if not isinstance(catalogue_id,str):raise AtlasError('Некорректный ID своего списка')
+                        template=old_catalogue.get(catalogue_id)
+                        if not template:raise AtlasError('Мой список не найден; выберите его заново')
+                        item['catalogue_origin']=catalogue_id
+                        if template.get('content'):
+                            key=item.get('id') or secrets.token_hex(8)
+                            if not isinstance(key,str) or not re.fullmatch('[a-f0-9]{16}',key):raise AtlasError('Некорректный ID копии своего списка')
+                            item['id']=key
+                            body=template['content'].encode('utf-8');parse_rule_list(body,template['format'])
+                            target=DATA/'catalogue-files'/(key+'.txt');item['url']=target.as_uri()
+                            catalogue_files.append((target,body))
+                        else:item['url']=template['url']
+                        item.setdefault('format',template['format'])
+                        for flag in ('allow_private','allow_symlinks'):item.setdefault(flag,template.get(flag,False))
                     prior = old_lists.get(item.get('id'))
                     if prior:
+                        item.setdefault('catalogue_origin',prior.get('catalogue_origin',''))
                         for flag in ('allow_private','allow_symlinks'):
                             item.setdefault(flag,prior.get(flag,False))
                     if prior and isinstance(item.get('url'), str) and item['url'].endswith('/[saved]'):
@@ -2281,6 +2390,13 @@ def dispatch(method, args):
             if any(x['outbound_config'] or x['mixed_proxy']['enabled'] for x in current['settings']['sections']):
                 # Validate expert graphs with the real engine before changing saved state.
                 check(make_config(current, tun=False))
+            for target,body in catalogue_files:
+                target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+                if target.parent.is_symlink() or target.is_symlink():raise AtlasError('Недопустимая ссылка в хранилище своих списков')
+                pending=target.with_name('.'+target.name+'.'+secrets.token_hex(8))
+                try:
+                    pending.write_bytes(body);pending.chmod(0o600);os.replace(pending,target)
+                finally:pending.unlink(missing_ok=True)
             atomic(STATE, current)
             new_guard = current['settings']['kill_switch']
             old_guard = previous['settings'].get('kill_switch', False)

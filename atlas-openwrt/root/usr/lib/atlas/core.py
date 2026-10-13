@@ -782,7 +782,7 @@ def parse_subscription(body, trusted_json=False):
 
 def defaults():
     return {'version': 1, 'subscriptions': [], 'settings': {'mode': 'rules', 'selected': 'auto',
-        'domains': [], 'cidrs': [], 'bypass_domains': [], 'bypass_cidrs': [], 'interval_hours': 12,
+        'domains': [], 'cidrs': [], 'bypass_domains': [], 'bypass_cidrs': [], 'interval_hours': 12, 'list_catalogue': [],
         'countries': [], 'excluded_countries': [], 'preferred_countries': [], 'require_verified_countries': False, 'protocols': [], 'include_names': [], 'exclude_names': [],
         'group_order': False, 'auto_interval_seconds': 60, 'auto_tolerance_ms': 80, 'interrupt_connections': False,
         'auto_strategy': 'fastest', 'min_ping_ms': 0, 'max_ping_ms': 0,
@@ -952,12 +952,41 @@ def validate_settings(data):
         password = text(result['mixed_proxy_password'], 128)
         if not re.fullmatch('[A-Za-z0-9_.-]{3,64}', username) or len(password) < 12:
             raise AtlasError('Для LAN proxy нужны имя пользователя и пароль минимум 12 символов')
+    catalogue=[];catalogue_ids=set();catalogue_names=set();catalogue_bytes=0
+    if not isinstance(result['list_catalogue'],list):
+        raise AtlasError('Мои списки должны быть массивом')
+    for item in result['list_catalogue']:
+        required={'id','name','url','format'}
+        if not isinstance(item,dict) or required-set(item) or set(item)-required-{'allow_private','allow_symlinks','content'}:
+            raise AtlasError('Некорректная запись в Моих списках')
+        if not isinstance(item['id'],str) or not re.fullmatch('[a-f0-9]{16}',item['id']) or item['id'] in catalogue_ids:
+            raise AtlasError('ID Моих списков должен быть уникальным')
+        if not isinstance(item['name'],str):raise AtlasError('Укажите название своего списка')
+        name=text(item['name'].strip(),64)
+        if not name or name.casefold() in catalogue_names:raise AtlasError('Название своего списка должно быть уникальным')
+        if item['format'] not in ('auto','domains','hosts','cidrs','adguard','json','srs'):
+            raise AtlasError('Неподдерживаемый формат своего списка')
+        flags={key:item.get(key,False) for key in ('allow_private','allow_symlinks')}
+        if any(type(value) is not bool for value in flags.values()):raise AtlasError('Разрешения своего списка должны быть логическими значениями')
+        content=item.get('content','')
+        if not isinstance(content,str):raise AtlasError('Содержимое своего списка должно быть текстом')
+        size=len(content.encode('utf-8'));catalogue_bytes+=size
+        if size>1024*1024 or catalogue_bytes>MAX_BYTES:raise AtlasError('Один текстовый список ограничен 1 МиБ, библиотека текстов — 4 МиБ')
+        if content.strip():
+            if item['format'] not in ('auto','domains','cidrs'):raise AtlasError('Для своего текста выберите домены, IP или автоматический формат')
+            if item['url']:raise AtlasError('Выберите либо ссылку, либо текст своего списка')
+            url=''
+        else:
+            content='';url=rule_list_url(item['url'],allow_private=flags['allow_private'])
+        catalogue_ids.add(item['id']);catalogue_names.add(name.casefold())
+        catalogue.append(dict(id=item['id'],name=name,url=url,format=item['format'],content=content,**flags))
+    result['list_catalogue']=catalogue
     if not isinstance(result['remote_lists'], list) or len(result['remote_lists']) > MAX_RULE_LISTS:
         raise AtlasError('Источники списков должны быть массивом')
     lists, list_ids, total_entries = [], set(), 0
     for source in result['remote_lists']:
         required = {'name','url','policy','format','enabled'}
-        allowed = required | {'id','domains','cidrs','updated','error','count','srs_cached','interface','section','file_version','allow_private','allow_symlinks','source_cached','source_rules'}
+        allowed = required | {'id','domains','cidrs','updated','error','count','srs_cached','interface','section','file_version','allow_private','allow_symlinks','source_cached','source_rules','catalogue_origin'}
         if not isinstance(source, dict) or required - set(source) or set(source) - allowed:
             raise AtlasError('Некорректная запись списка правил')
         name = text(source['name'].strip(), 64)
@@ -988,6 +1017,9 @@ def validate_settings(data):
         if source['policy'] != 'interface' and iface:
             raise AtlasError('Интерфейс можно задать только для политики interface')
         normalized = {'id':list_id,'name':name,'url':url,'policy':source['policy'],'format':source['format'],'enabled':source['enabled'],'interface':iface,'section':source.get('section','')}
+        origin=source.get('catalogue_origin','')
+        if not isinstance(origin,str) or (origin and not re.fullmatch('[a-f0-9]{16}',origin)):raise AtlasError('Некорректный источник библиотечного списка')
+        normalized['catalogue_origin']=origin
         normalized['file_version'] = source.get('file_version', '') if isinstance(source.get('file_version',''), str) else ''
         normalized.update({flag:source.get(flag,False) for flag in ('allow_private','allow_symlinks')})
         for key in ('domains','cidrs'):
