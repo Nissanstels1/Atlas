@@ -257,8 +257,7 @@ const all=n=>[n,...n.children.flatMap(all)];
  const libraryKind=all(modal).find(n=>(n.attributes.class||'').includes('at-library-kind'));libraryKind.value='text';libraryKind.listeners.change();
  const libraryName=all(modal).find(n=>(n.attributes.class||'').includes('at-library-name'));libraryName.value='My handwritten list';libraryName.listeners.input();
  const libraryContent=all(modal).find(n=>(n.attributes.class||'').includes('at-library-content'));libraryContent.value='example.org\nexample.net';libraryContent.listeners.input();
- const addLibrary=all(modal).find(n=>n.tag==='button'&&n.textContent==='Добавить в библиотеку');await libraryClick(addLibrary);
- assert(modal.textContent.includes('My handwritten list'),'User source missing from library form');
+ // Saving a filled source must not require a second staging button first.
  const saveLibrary=all(modal).find(n=>n.tag==='button'&&n.textContent==='Сохранить библиотеку');await libraryClick(saveLibrary);
  const libraryCall=calls.filter(c=>c.method==='save_settings').at(-1).args[0];assert(Object.keys(libraryCall).join(',')==='list_catalogue','Library save must not submit routing changes');
  assert(libraryCall.list_catalogue[0].content.includes('example.net'),'Handwritten source content lost');
