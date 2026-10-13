@@ -9,4 +9,5 @@ sed -i '/atlas[.]py scheduled/d' /etc/crontabs/root
 echo '* * * * * /usr/bin/python3 /usr/lib/atlas/atlas.py scheduled >/dev/null 2>&1' >> /etc/crontabs/root
 /etc/init.d/cron enable
 /etc/init.d/cron restart
+/etc/init.d/atlas-dns-restore enable
 exit 0

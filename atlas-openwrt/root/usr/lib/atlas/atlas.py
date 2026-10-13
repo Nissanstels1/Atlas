@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import signal
 import shlex
 import socket
 import struct
@@ -524,11 +525,18 @@ def automatic_select(current):
         return {'changed': False, 'reason': 'controller-unavailable'}
 
 
-def wait_engine_ready(attempts=60):
+def wait_engine_ready(attempts=180):
     """procd can report the launcher before sing-box is accepting requests."""
     for _ in range(attempts):
         if service_running():
             try:
+                launch=read_json(RUN/'startup.json',{})
+                if launch and launch.get('stage')!='ready':
+                    time.sleep(.4)
+                    continue
+                if launch.get('requires_dns') and not dhcp_dns_active():
+                    time.sleep(.4)
+                    continue
                 if isinstance(clash_request('GET','/proxies',timeout=1).get('proxies'),dict) and service_running():
                     return True
             except (AtlasError,OSError,http.client.HTTPException,ValueError):
@@ -544,6 +552,10 @@ def healthcheck():
         return {'ok': True, 'reason': 'disabled'}
     if any(service_running(name) for name in ('podkop', 'sing-box', 'passwall', 'passwall2', 'openclash')):
         return {'ok': False, 'reason': 'conflicting-service'}
+    launch=read_json(RUN/'startup.json',{})
+    if launch.get('local_ready') and not service_running():
+        restored=restore_start_network()
+        startup_report('supervisor-lost',failed=True,local_ready=False,network_restored=restored)
     current = state()
     config_store = stored_config_dir(current['settings'])
     current_config = read_json(CONFIG, None)
@@ -572,13 +584,21 @@ def healthcheck():
     if country_policy is not None:
         return country_policy
     if service_running():
-        return {'ok': True, 'reason': 'healthy'}
+        launch=read_json(RUN/'startup.json',{})
+        if launch.get('stage') in ('restoring-dns','starting','waiting-clock','connecting-dns') and 0 <= time.monotonic()-launch.get('monotonic',0) < 90:
+            return {'ok':True,'reason':'starting'}
+        if wait_engine_ready(attempts=2):
+            return {'ok': True, 'reason': 'healthy'}
     stamp = int(time.time())
-    attempts = [x for x in read_json(RUN / 'recovery.json', {}).get('attempts', []) if type(x) is int and stamp - x < 600]
-    if len(attempts) >= 3:
+    clock=time.monotonic()
+    recovery=read_json(RUN/'recovery.json',{})
+    attempts=[x for x in recovery.get('attempts',[]) if type(x) is int and 0 <= stamp-x < 600]
+    monotonic_attempts=[x for x in recovery.get('monotonic_attempts',[]) if type(x) in (int,float) and 0 <= clock-x < 600] if 'monotonic_attempts' in recovery else [clock-(stamp-x) for x in attempts]
+    if len(monotonic_attempts) >= 3:
         return {'ok': False, 'reason': 'restart-limit'}
     attempts.append(stamp)
-    atomic(RUN / 'recovery.json', {'attempts': attempts})
+    monotonic_attempts.append(clock)
+    atomic(RUN / 'recovery.json', {'attempts': attempts[-3:],'monotonic_attempts':monotonic_attempts})
     try:
         proc = run(['/etc/init.d/atlas', 'restart'], 90)
         ok = proc.returncode == 0 and wait_engine_ready()
@@ -853,16 +873,17 @@ def set_dnsmasq_option(selector, name, values):
                 raise AtlasError('Не удалось обновить параметр dnsmasq %s' % name)
 
 
-def commit_dnsmasq():
+def commit_dnsmasq(restart=True):
     result = run(['/sbin/uci', 'commit', 'dhcp'], 5)
     if result.returncode:
         raise AtlasError('Не удалось сохранить конфигурацию dnsmasq')
-    result = run(['/etc/init.d/dnsmasq', 'restart'], 20)
-    if result.returncode:
-        raise AtlasError('dnsmasq не перезапустился; проверьте настройки DNS')
+    if restart:
+        result = run(['/etc/init.d/dnsmasq', 'restart'], 20)
+        if result.returncode:
+            raise AtlasError('dnsmasq не перезапустился; проверьте настройки DNS')
 
 
-def manage_dhcp_dns(enabled):
+def manage_dhcp_dns(enabled, restart=True):
     """Optionally point dnsmasq to sing-box, preserving/restoring its exact prior options."""
     if type(enabled) is not bool:
         raise AtlasError('Некорректный режим DNS для dnsmasq')
@@ -920,7 +941,10 @@ def manage_dhcp_dns(enabled):
             set_dnsmasq_option(selector, name, original.get('values', []) if original.get('present') else [])
             changed = True
     if changed:
-        commit_dnsmasq()
+        if restart:
+            commit_dnsmasq()
+        else:
+            commit_dnsmasq(restart=False)
     DHCP_BACKUP.unlink(missing_ok=True)
     return {'enabled': False, 'restored': changed, 'changed_by_admin': changed_by_admin}
 
@@ -1306,7 +1330,7 @@ def apply(current, enable=False):
         r = run(['/etc/init.d/atlas', 'restart'], 90)
         if r.returncode:
             raise AtlasError('Не удалось запустить сервис')
-        for _ in range(60):
+        for _ in range(180):
             time.sleep(.4)
             if service_running():
                 # procd can report the Python launcher before exec and engine startup.
@@ -1314,7 +1338,8 @@ def apply(current, enable=False):
                     ready = isinstance(clash_request('GET', '/proxies', timeout=1).get('proxies'), dict)
                 except (OSError, AtlasError, http.client.HTTPException):
                     ready = False
-                if ready and service_running():
+                startup=read_json(RUN/'startup.json',{})
+                if ready and service_running() and (not startup or startup.get('stage')=='ready'):
                     if enable:
                         run(['/etc/init.d/atlas', 'enable'])
                     config_store = stored_config_dir(current['settings'])
@@ -1823,6 +1848,7 @@ def public_status():
             'privacy_egress': read_json(RUN / 'privacy-egress.json', {}),
             'selftest': read_json(RUN / 'selftest.json', {}),
             'auto_selection': read_json(RUN / 'auto-selection.json', {}),
+            'startup': read_json(RUN/'startup.json',{}), 'last_start_failure': read_json(DATA/'last-start-failure.json',{}),
             'watchdog': read_json(RUN / 'watchdog.json', {}), 'version': VERSION, 'autostart': os.name=='posix' and os.access('/etc/rc.d/S99atlas',os.X_OK)}
 
 
@@ -2393,6 +2419,94 @@ def prepare_engine_start(config):
     return prepare_launch_cache(config, secrets.token_hex(16))
 
 
+def startup_report(stage, **fields):
+    payload=dict(fields,stage=stage,at=int(time.time()),monotonic=time.monotonic())
+    atomic(RUN/'startup.json',payload)
+    if stage=='ready':
+        atomic(DATA/'startup-last-ready.json',{'at':payload['at']})
+    if fields.get('failed'):
+        atomic(DATA/'last-start-failure.json',payload)
+        run(['logger','-t','atlas','Startup protection: '+stage],3)
+
+
+def restore_start_network():
+    restored=True
+    with named_lock('dns-integration.lock',True):
+        try:
+            manage_dhcp_dns(False)
+        except (AtlasError,OSError,subprocess.TimeoutExpired):
+            restored=False
+    try:
+        manage_ingress_firewall(False)
+    except (AtlasError,OSError,subprocess.TimeoutExpired):
+        restored=False
+    # The configured fail-closed policy is intentionally never removed here.
+    return restored
+
+
+def supervise_engine():
+    from start_guard import supervise,clock_ready
+    stopped=[False]
+    old_handlers={}
+    for signum in (signal.SIGTERM,signal.SIGINT):
+        old_handlers[signum]=signal.signal(signum,lambda *args:stopped.__setitem__(0,True))
+    try:
+        startup_report('restoring-dns',local_ready=False)
+        if not restore_start_network():
+            startup_report('restore-failed',failed=True,local_ready=False,network_restored=False)
+            return 1
+        config=prepare_engine_start(read_json(CONFIG,None))
+        check(config)
+        atomic(CONFIG,config)
+        current=state()
+        dns_inbound=next((x for x in config.get('inbounds',[]) if x.get('tag')=='dhcp-dns'),None)
+        if current['settings']['dhcp_dns_enabled'] and not dns_inbound:
+            raise AtlasError('В конфигурации отсутствует DNS для dnsmasq')
+        last_ready=read_json(DATA/'startup-last-ready.json',{}).get('at',0)
+        clock_waiting=[False]
+        def ready():
+            if not clock_ready(time.time(),last_ready):
+                if not clock_waiting[0]:
+                    startup_report('waiting-clock',local_ready=False)
+                    clock_waiting[0]=True
+                return False
+            if not isinstance(clash_request('GET','/proxies',timeout=1).get('proxies'),dict):
+                return False
+            if current['settings']['dhcp_dns_enabled']:
+                with socket.create_connection((dns_inbound['listen'],dns_inbound['listen_port']),timeout=1):
+                    pass
+                launch=read_json(RUN/'startup.json',{})
+                if launch.get('stage')=='ready' and not dhcp_dns_active():
+                    return False
+            return True
+        def attach():
+            enabled=any(x.get('include_interface') and re.fullmatch(r'atli[0-9]+',x.get('interface_name','')) for x in config.get('inbounds',[]))
+            manage_ingress_firewall(enabled)
+            with named_lock('dns-integration.lock',True):
+                manage_dhcp_dns(current['settings']['dhcp_dns_enabled'])
+        parent_pid=os.getpid()
+        def child_setup():
+            # If the supervisor is killed/crashes, its engine must not remain
+            # alive and block the replacement's API/TUN ports.
+            import ctypes
+            libc=ctypes.CDLL(None,use_errno=True)
+            if libc.prctl(1,signal.SIGKILL,0,0,0)!=0:
+                os._exit(126)
+            if os.getppid()!=parent_pid:
+                os._exit(126)
+        child=subprocess.Popen([BINARY,'run','-c',str(CONFIG)],stdin=subprocess.DEVNULL,preexec_fn=child_setup)
+        def report(stage,**fields):
+            startup_report(stage,requires_dns=current['settings']['dhcp_dns_enabled'],**fields)
+        return supervise(child,ready,attach,restore_start_network,report,stopped=lambda:stopped[0])
+    except (AtlasError,OSError,ValueError,subprocess.SubprocessError):
+        restored=restore_start_network()
+        startup_report('prepare-failed',failed=True,local_ready=False,network_restored=restored)
+        return 1
+    finally:
+        for signum,handler in old_handlers.items():
+            signal.signal(signum,handler)
+
+
 def rpc_request_limit(method):
     if method=='import_rules':
         return 6*1024*1024
@@ -2418,14 +2532,12 @@ def main():
         print(json.dumps(METHODS))
         return
     setup()
-    if len(sys.argv) > 1 and sys.argv[1] == 'engine-run':
-        config = prepare_engine_start(read_json(CONFIG, None))
-        if not isinstance(config, dict):
-            raise AtlasError('Конфигурация службы отсутствует')
-        check(config)
-        atomic(CONFIG, config)
-        os.execv(BINARY, [BINARY, 'run', '-c', str(CONFIG)])
+    if len(sys.argv)>1 and sys.argv[1]=='startup-pending':
+        startup_report('starting',local_ready=False)
         return
+    if len(sys.argv) > 1 and sys.argv[1] == 'engine-run':
+        with named_lock('engine-supervisor.lock',True):
+            sys.exit(supervise_engine())
     if len(sys.argv) > 2 and sys.argv[1] == 'worker':
         worker(sys.argv[2])
         return
@@ -2435,9 +2547,13 @@ def main():
         check(config)
         atomic(CONFIG, config)
         return
-    if len(sys.argv) > 1 and sys.argv[1] in ('dhcp-sync', 'dhcp-restore'):
+    if len(sys.argv) > 1 and sys.argv[1] in ('dhcp-sync', 'dhcp-restore', 'dhcp-boot-restore'):
         try:
-            manage_dhcp_dns(state()['settings']['dhcp_dns_enabled'] if sys.argv[1] == 'dhcp-sync' else False)
+            with named_lock('dns-integration.lock',True):
+                if sys.argv[1]=='dhcp-boot-restore':
+                    manage_dhcp_dns(False,restart=False)
+                else:
+                    manage_dhcp_dns(state()['settings']['dhcp_dns_enabled'] if sys.argv[1] == 'dhcp-sync' else False)
         except (AtlasError, OSError, subprocess.TimeoutExpired) as exc:
             print(str(exc), file=sys.stderr)
             sys.exit(1)

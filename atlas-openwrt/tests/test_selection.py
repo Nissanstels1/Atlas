@@ -285,6 +285,15 @@ class SavedFilters(unittest.TestCase):
             result=atlas.healthcheck()
         self.assertEqual(result['reason'],'restart-limit');run.assert_not_called()
 
+    def test_watchdog_limit_survives_wall_clock_change(self):
+        current=atlas.state();config=atlas.runtime_config(current);atlas.atomic(atlas.CONFIG,config)
+        clock=time.monotonic()
+        atlas.atomic(atlas.RUN/'recovery.json',{'attempts':[9999999999]*3,'monotonic_attempts':[clock-20,clock-10,clock]})
+        def exists(path):return path.as_posix()=='/etc/rc.d/S99atlas'
+        with mock.patch.object(atlas.Path,'exists',exists),mock.patch.object(atlas,'check'),mock.patch.object(atlas,'service_running',return_value=False),mock.patch.object(atlas.time,'time',return_value=100):
+            result=atlas.healthcheck()
+        self.assertEqual(result['reason'],'restart-limit')
+
     def test_netifd_events_are_limited_to_configured_logical_interfaces(self):
         current=atlas.state();current['settings'].update(interface_monitoring=True,monitored_interfaces=['wan'])
         atlas.atomic(atlas.STATE,current)

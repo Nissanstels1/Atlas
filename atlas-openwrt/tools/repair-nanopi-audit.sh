@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0,'/usr/lib/atlas')
 from version import VERSION
 if VERSION!='0.29.0':raise SystemExit('This repair requires Atlas 0.29.0; no files changed.')
-files={'root/usr/lib/atlas/atlas.py': '1ff6c245b9deba0fe2ee755fc0eec6b8b7a3df1f7132a6cf5814320c65bce165', 'root/usr/lib/atlas/core.py': '32b09dc8f066b61cb0d4d3a883742e3da4819c1f54c87c085f9ab4326a1f90ee', 'root/usr/lib/atlas/public_dns.py': '4b89247d875dfd71d8c96de5d8b124d612afa0d47b5374af7c7a1e68e59b895d', 'root/www/luci-static/resources/view/atlas/overview.js': '89d21a3c5386639566b8814d84358b9be906ca5447f5e71c38e08a55617a2a5f', 'root/www/luci-static/resources/atlas/atlas.css': '3ef7159e1899afbebc1756af5b7edf0afe2529451db1aaa4a240324953271155', 'root/etc/init.d/atlas': '35ab2921faf63daa8968e3c69318802ac699095ab14adc42c2180119d421c2c8', 'root/www/luci-static/resources/view/atlas/overview_89d21a3c.js': '89d21a3c5386639566b8814d84358b9be906ca5447f5e71c38e08a55617a2a5f', 'root/usr/share/luci/menu.d/luci-app-atlas.json': '4871f82ecdc2b82b92dbcc87e56fbc6e99fd62df3573e752186ece1f9791de4b'}
+files={'root/usr/lib/atlas/atlas.py': '233d1bf2bf010769e6f4043f94308356eb0b79e66919edad717e25e766433a7f', 'root/usr/lib/atlas/core.py': '32b09dc8f066b61cb0d4d3a883742e3da4819c1f54c87c085f9ab4326a1f90ee', 'root/usr/lib/atlas/public_dns.py': '4b89247d875dfd71d8c96de5d8b124d612afa0d47b5374af7c7a1e68e59b895d', 'root/usr/lib/atlas/start_guard.py': 'fdbeaf61ac0ee49f7444a4d03ea5353780149a1f8a91d9604d8d7ff8609c13f1', 'root/www/luci-static/resources/view/atlas/overview.js': '57cf6674975ddf0020211acf7c4589004bce808534c0f137f0e5ac1dfcce4cd3', 'root/www/luci-static/resources/atlas/atlas.css': '3ef7159e1899afbebc1756af5b7edf0afe2529451db1aaa4a240324953271155', 'root/etc/init.d/atlas': 'f8bf2f57c3285e1349961f8a9c476976a80343984ee1be031c03a9119935c17d', 'root/etc/init.d/atlas-dns-restore': '262cdf274d5f92f49036890cca917bf84a0f9e8576e059481397daaf7bed03ea', 'root/etc/uci-defaults/90-atlas': '83a35298bb04f0011f4f8b726ddfe53995268f9fb7d285d1b0127c70ee2204dd', 'root/www/luci-static/resources/view/atlas/overview_57cf6674.js': '57cf6674975ddf0020211acf7c4589004bce808534c0f137f0e5ac1dfcce4cd3', 'root/usr/share/luci/menu.d/luci-app-atlas.json': 'deca7cbde31200d98db008c42c4896ecefd8962efebab6f0dbb243de74a9ca8d'}
 directory=Path(sys.argv[1]);backup=Path('/etc/atlas/audit-repair-original')
 backup.mkdir(mode=0o700,exist_ok=True)
 staged=[]
@@ -33,14 +33,16 @@ try:
             saved.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
             saved.write_bytes(original[target]);saved.chmod(0o600)
         pending=target.with_name('.'+target.name+'.audit-new')
-        pending.write_bytes(content);pending.chmod(0o755 if str(target)=="/etc/init.d/atlas" else 0o644)
+        pending.write_bytes(content);pending.chmod(0o755 if str(target).startswith(("/etc/init.d/","/etc/uci-defaults/")) else 0o644)
         os.replace(pending,target);changed.append(target)
 except BaseException:
     for target in changed:
         if original[target] is None:target.unlink(missing_ok=True)
         else:
             pending=target.with_name('.'+target.name+'.audit-restore')
-            pending.write_bytes(original[target]);pending.chmod(0o755 if str(target)=="/etc/init.d/atlas" else 0o644);os.replace(pending,target)
+            pending.write_bytes(original[target]);pending.chmod(0o755 if str(target).startswith(("/etc/init.d/","/etc/uci-defaults/")) else 0o644);os.replace(pending,target)
     raise
 print('Audit repair installed. Routing was not restarted. Reload LuCI with Ctrl+F5.')
 PY
+
+/etc/init.d/atlas-dns-restore enable

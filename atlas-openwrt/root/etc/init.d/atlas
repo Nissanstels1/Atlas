@@ -30,12 +30,8 @@ start_service() {
     local engine=/usr/bin/sing-box
     [ ! -x /usr/lib/atlas-engine/bin/atlas-engine ] || engine=/usr/lib/atlas-engine/bin/atlas-engine
     "$engine" check -c /var/run/atlas/config.json >/tmp/atlas-engine-check.log 2>&1 || { atlas_start_failed engine-check; return 1; }
-    /usr/bin/python3 /usr/lib/atlas/atlas.py ingress-sync || { atlas_start_failed ingress-sync; return 1; }
-    if ! /usr/bin/python3 /usr/lib/atlas/atlas.py dhcp-sync >/tmp/atlas-dhcp-sync.log 2>&1; then
-        logger -t atlas "DNS integration failed: $(cat /tmp/atlas-dhcp-sync.log)"
-        atlas_start_failed dhcp-sync
-        return 1
-    fi
+    # The supervisor attaches DNS only after the engine is accepting requests.
+    /usr/bin/python3 /usr/lib/atlas/atlas.py startup-pending || { atlas_start_failed startup-pending; return 1; }
     procd_open_instance
     procd_set_param command /usr/bin/python3 /usr/lib/atlas/atlas.py engine-run
     procd_set_param respawn 3600 5 3

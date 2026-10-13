@@ -216,7 +216,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=unified-sections-20261012c' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=start-guard-20261012' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -316,6 +316,12 @@ return view.extend({
         self.sectionDashboardPanel = panel;
         return panel;
     },
+    startupCard: function() {
+        var d=this.data,launch=d.startup || {},failure=d.last_start_failure || {};
+        if(!launch.stage && !failure.stage)return label('');
+        var names={'restoring-dns':'Восстанавливается обычный DNS перед запуском','starting':'Ожидается готовность движка','waiting-clock':'Ожидается восстановление времени роутера','supervisor-lost':'Наблюдатель запуска аварийно завершился','connecting-dns':'Подключается DNS домашней сети','ready':'Движок и подключение DNS готовы','stopped':'Atlas остановлен; выполнено восстановление DNS','ready-timeout':'Движок не подтвердил готовность вовремя','engine-exited':'Движок завершился','engine-unresponsive':'Движок перестал отвечать','dns-integration-failed':'Не удалось подключить DNS','restore-failed':'Не удалось полностью восстановить DNS и служебные правила','prepare-failed':'Не удалось подготовить конфигурацию','supervisor-failed':'Ошибка наблюдения за запуском'};
+        return node('section','at-card at-padded',[node('h3','',label('Защита запуска')),node('p','',label(names[launch.stage] || 'Ожидается запуск Atlas')),node('p','at-footnote',label(launch.stage==='ready' ? 'Локальная готовность подтверждена. Доступность сайтов зависит от интернета провайдера и серверов; её показывают проверки профилей. При зависании движка Atlas восстановит прежний DNS и попробует перезапуск. Защита от прямого выхода, если включена, останется действовать.' : 'DNS устройств подключается к Atlas только после готовности движка. При ошибке сохраняется доступ к настройкам роутера; повторные попытки ограничены.')),failure.stage ? node('p','at-footnote',label('Последний сбой: '+(names[failure.stage] || failure.stage)+' · '+date(failure.at)+'. Это сохранённая запись, а не обязательно текущая ошибка.')) : label('')]);
+    },
     overviewPage: function() {
         var self = this, d = self.data, checks = d.checks || {}, measured = (d.runtime || {}).measurements || {};
         var measured = d.nodes.filter(function(n) { return checks[n.key] && checks[n.key].ok; });
@@ -323,8 +329,9 @@ return view.extend({
         var selected = d.runtime && d.runtime.blocked ? (d.runtime.reason === 'no-main-pool' ? d.runtime.message : 'Заблокирован критериями выбора') : d.runtime && d.runtime.available && d.runtime.selected ? d.runtime.name : 'Выбор движка пока неизвестен';
         return node('div', 'at-content', [
             node('section','at-wizard-start',[node('div','',[node('span','at-start-label',label('НАЧНИТЕ ЗДЕСЬ')),node('h2','',label('Настроить Atlas по шагам')),node('p','',label('Ответьте на простые вопросы: какие сайты открывать через прокси, какое подключение использовать и как проверять серверы. В конце мастер покажет итог. До подтверждения маршруты не меняются.'))]),self.button('Настроить по вопросам',function(){self.setupWizard();},'primary at-wizard-launch',self.busy())]),
+            self.startupCard(),
             node('section', 'at-hero', [
-                node('div', 'at-hero-copy', [node('h2', '', label(d.running ? 'Atlas работает' : 'Atlas остановлен')),
+                node('div', 'at-hero-copy', [node('h2', '', label(d.running && d.startup && ['restoring-dns','starting','waiting-clock','connecting-dns'].indexOf(d.startup.stage)>=0 ? 'Atlas запускается' : d.running ? 'Atlas запущен' : 'Atlas остановлен')),
                     node('p', '', label('Подключения → группы сайтов → проверка и применение. Мастер проведёт настройку по шагам.')),
                     node('div', 'at-actions', [self.button(d.running ? 'Применить изменения' : 'Запустить Atlas', function() { return self.action(d.running ? 'apply' : 'start'); }, 'primary', self.busy() || (!d.nodes.length && !(d.settings.remote_lists || []).some(function(x){return x.enabled !== false;}) && !(d.settings.sections || []).some(function(x) { return x.enabled !== false && (x.outbound_config_set || x.policy !== 'proxy'); }))),
                         d.running ? self.button('Остановить', function() { return self.action('stop'); }, 'ghost', self.busy()) : self.button('Добавить подписку', function() { self.subscriptionDialog(); }, 'ghost', self.busy())])]),

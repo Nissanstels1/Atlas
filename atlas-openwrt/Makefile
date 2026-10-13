@@ -13,7 +13,7 @@ define Package/luci-app-atlas
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=Atlas - subscriptions and routing for sing-box
-  DEPENDS:=+luci-base +rpcd +python3-light +python3-logging +python3-urllib +python3-openssl +python3-uuid +python3-codecs +python3-cryptography +ca-bundle +sing-box +kmod-tun +kmod-nft-tproxy +kmod-nft-socket +kmod-nft-queue +firewall4 +ip-full
+  DEPENDS:=+luci-base +rpcd +python3-light +python3-ctypes +python3-logging +python3-urllib +python3-openssl +python3-uuid +python3-codecs +python3-cryptography +ca-bundle +sing-box +kmod-tun +kmod-nft-tproxy +kmod-nft-socket +kmod-nft-queue +firewall4 +ip-full
 endef
 
 define Package/luci-app-atlas/description
@@ -36,7 +36,7 @@ define Package/luci-app-atlas/install
 	$(INSTALL_DIR) $(1)/etc/atlas
 	chmod 700 $(1)/etc/atlas
 	chmod 600 $(1)/etc/atlas/state.json
-	chmod 755 $(1)/etc/init.d/atlas $(1)/etc/uci-defaults/90-atlas $(1)/etc/hotplug.d/iface/95-atlas $(1)/usr/libexec/rpcd/atlas
+	chmod 755 $(1)/etc/init.d/atlas-dns-restore $(1)/etc/init.d/atlas $(1)/etc/uci-defaults/90-atlas $(1)/etc/hotplug.d/iface/95-atlas $(1)/usr/libexec/rpcd/atlas
 endef
 
 define Package/luci-app-atlas/postinst
@@ -55,6 +55,7 @@ define Package/luci-app-atlas/prerm
 [ "$${1:-}" = upgrade ] && exit 0
 /etc/init.d/atlas stop
 /etc/init.d/atlas disable
+/etc/init.d/atlas-dns-restore disable
 sed -i '/atlas[.]py scheduled/d' /etc/crontabs/root
 exit 0
 endef

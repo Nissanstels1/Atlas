@@ -26,6 +26,21 @@ def dnsmasq_show(server=None, noresolv=None, cachesize=None):
 
 
 class DnsmasqIntegration(unittest.TestCase):
+    def test_early_boot_restore_commits_without_starting_dnsmasq(self):
+        atlas.atomic(self.backup, {'sections':[{'section':'@dnsmasq[0]','options':{
+            'server':{'present':False,'values':[]},'noresolv':{'present':False,'values':[]},'cachesize':{'present':True,'values':['150']}}}]})
+        output=dnsmasq_show(['127.0.0.42'],'1','0')
+        calls=[]
+        def run(args,timeout=10):
+            calls.append(args)
+            return command_result(args,output if args[-2:]==['show','dhcp'] else b'')
+        with mock.patch.object(atlas,'run',side_effect=run):
+            result=atlas.manage_dhcp_dns(False,restart=False)
+        self.assertTrue(result['restored'])
+        self.assertIn(['/sbin/uci','commit','dhcp'],calls)
+        self.assertFalse(any('/etc/init.d/dnsmasq' in x for x in calls))
+        self.assertFalse(self.backup.exists())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.backup = Path(self.temp.name) / 'dhcp-dns-backup.json'
