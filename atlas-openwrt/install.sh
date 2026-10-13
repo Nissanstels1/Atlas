@@ -11,22 +11,22 @@ actual=$(sha256sum "$directory/install-release.sh" | awk '{print $1}')
 [ "$actual" = '63bc588105e12aff89e9dff8713cc112a7130a7bb02517b593e90cde58e63497' ] || { echo 'Installer checksum mismatch. Nothing installed.'; exit 1; }
 if command -v opkg >/dev/null 2>&1; then
     opkg update
-    opkg install python3-light python3-logging python3-urllib python3-openssl python3-uuid python3-codecs python3-cryptography
+    opkg install python3-light python3-ctypes python3-logging python3-urllib python3-openssl python3-uuid python3-codecs python3-cryptography
     [ -x /usr/bin/python3 ] || { echo 'Python interpreter is missing. Check firmware feeds and package installation errors.'; exit 1; }
     sh "$directory/install-release.sh" "$base"
 elif command -v apk >/dev/null 2>&1; then
     apk update
-    apk add python3-light python3-logging python3-urllib python3-openssl python3-uuid python3-codecs python3-cryptography
+    apk add python3-light python3-ctypes python3-logging python3-urllib python3-openssl python3-uuid python3-codecs python3-cryptography
     [ -x /usr/bin/python3 ] || { echo 'Python interpreter is missing. Check firmware feeds and package installation errors.'; exit 1; }
     # Release APKs are unsigned; each downloaded package is checked against SHA256SUMS.
     sh "$directory/install-release.sh" "$base" --allow-untrusted
 else echo 'No supported package manager.'; exit 1
 fi
 # Install the verified post-release fixes from one immutable source revision.
-repair_ref=51fcde7cdc471141b51e0c5ceb795320dbe49334
+repair_ref=368f18bf44376c4013569bdaaff4f4bab0b0e68d
 wget -q -O "$directory/repair.sh" "https://raw.githubusercontent.com/Nissanstels1/Atlas/$repair_ref/atlas-openwrt/tools/repair-nanopi-audit.sh"
 actual=$(sha256sum "$directory/repair.sh" | awk '{print $1}')
-[ "$actual" = 'da3f1e9f835f83d835ea55d6f53bfa0344b01d0824be4cb2fcac22b405fe10cb' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
+[ "$actual" = 'd07dd11cdfd3998300ad189709d0d3a7aa2cc291e34aa43fa790315c38a0d945' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
 # Pin the repair's source downloads too; future main changes cannot mix revisions.
 /usr/bin/python3 - "$directory/repair.sh" "$repair_ref" <<'PY'
 from pathlib import Path
