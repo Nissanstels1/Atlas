@@ -45,6 +45,10 @@ CONFIG = RUN / 'config.json'
 SCRIPT = '/usr/lib/atlas/atlas.py'
 BINARY = __import__('engine_features').binary_path()
 MAX_INLINE_PROFILE_BYTES = 256 * 1024
+ADBLOCK_PRESETS = {
+    'peter': 'https://pgl.yoyo.org/as/serverlist.php?hostformat=nohtml&showintro=0',
+    'hagezi': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/light.txt',
+}
 METHODS = {'status': {}, 'save_subscription': {'id': '', 'name': '', 'url': '', 'enabled': True, 'headers': '', 'clear_headers': False},
            'import_subscriptions': {'items': []},
            'import_profiles': {'name': '', 'content': '', 'id': ''},
@@ -1972,6 +1976,11 @@ def public_status():
         parsed=urlsplit(source['url'])
         source['url']=source['url'] if parsed.scheme=='file' else '%s://%s/[saved]'%(parsed.scheme,parsed.hostname)
     for source in public_settings.get('remote_lists', []):
+        source.pop('adblock_preset', None)
+        if source.get('policy') == 'dnsblock' and not source.get('section') and not source.get('interface'):
+            preset = next((key for key, url in ADBLOCK_PRESETS.items() if source.get('url') == url), None)
+            if preset:
+                source['adblock_preset'] = preset
         parsed = urlsplit(source['url'])
         source['url'] = source['url'] if parsed.scheme == 'file' else '%s://%s/[saved]' % (parsed.scheme, parsed.hostname)
         source['count'] = source.get('count', 0) if rule_set_format(source) else len(source.get('domains', [])) + len(source.get('cidrs', []))
@@ -2446,6 +2455,7 @@ def dispatch(method, args):
             old_lists = {item['id']: item for item in current['settings'].get('remote_lists', [])}
             for item in submitted.get('remote_lists', []):
                 if isinstance(item, dict):
+                    item.pop('adblock_preset', None)  # Derived public metadata, never a stored permission.
                     catalogue_id=item.pop('source_catalogue_id',None)
                     if catalogue_id is not None:
                         if not isinstance(catalogue_id,str):raise AtlasError('Некорректный ID своего списка')

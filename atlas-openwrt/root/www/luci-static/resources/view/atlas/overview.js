@@ -61,6 +61,21 @@ function node(tag, cls, children, attrs) {
     }
     return element;
 }
+function atlasAdblockMatch(item,preset) {
+    return item.policy==='dnsblock' && !item.section && !item.interface && (item.adblock_preset===preset.key || item.url===preset.url);
+}
+function atlasRouteName(tag,data) {
+    var labels={direct:'Напрямую','policy-block':'Заблокировано',proxy:'Общий прокси',auto:'Общий автовыбор'};
+    if(labels[tag])return labels[tag];
+    var profile=(data.nodes || []).find(function(n){return n.key===tag;});
+    if(profile)return profile.name;
+    var pool=(data.subscriptions || []).find(function(s){return tag==='pool_'+s.id || tag==='auto_'+s.id;});
+    if(pool)return (tag.indexOf('auto_')===0 ? 'Автовыбор: ' : 'Подписка: ')+pool.name;
+    var section=(data.settings.sections || []).find(function(s){return tag.indexOf('section_'+s.id+'_')===0;});
+    if(section){var member=(data.nodes || []).find(function(n){return tag==='section_'+section.id+'_'+n.key;});return member ? member.name+' · '+section.name : 'Секция: '+section.name;}
+    return tag;
+}
+
 function label(t) { return document.createTextNode(String(t)); }
 function pill(t, cls) { return node('span', 'at-pill ' + (cls || ''), label(t)); }
 function date(t) { return t ? new Date(t * 1000).toLocaleString('ru-RU') : 'Ещё не обновлялась'; }
@@ -295,7 +310,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=plain-routing-library-20261013' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=detailed-ui-final-20261014' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -772,9 +787,9 @@ return view.extend({
 
     adblockDialog: function() {
         var self=this,s=self.data.settings,msg=node('p','at-inline-error');
-        var presets=[{name:'Peter Lowe — лёгкий список',url:'https://pgl.yoyo.org/as/serverlist.php?hostformat=nohtml&showintro=0',format:'domains'},
-            {name:'HaGeZi Light — реклама и трекеры',url:'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/light.txt',format:'adguard'}];
-        presets.forEach(function(x){x.input=node('input','at-adblock-preset',[],{type:'checkbox',checked:(s.remote_lists || []).some(function(y){return y.url===x.url && y.policy==='dnsblock' && y.enabled!==false;})});});
+        var presets=[{key:'peter',name:'Peter Lowe — лёгкий список',url:'https://pgl.yoyo.org/as/serverlist.php?hostformat=nohtml&showintro=0',format:'domains'},
+            {key:'hagezi',name:'HaGeZi Light — реклама и трекеры',url:'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/light.txt',format:'adguard'}];
+        presets.forEach(function(x){x.input=node('input','at-adblock-preset',[],{type:'checkbox',checked:(s.remote_lists || []).some(function(y){return atlasAdblockMatch(y,x) && y.enabled!==false;})});});
         var dns=node('select','at-adblock-dns',[atlasElement('option',{value:'keep'},'Сохранить текущий DNS'),atlasElement('option',{value:'adguard'},'AdGuard DNS — фильтрация рекламы'),atlasElement('option',{value:'cloudflare'},'Cloudflare DNS — без рекламного фильтра')]);
         function choose(kind){if(saving)return Promise.resolve();presets.forEach(function(x,index){x.input.checked=(kind==='peter' && index===0) || (kind==='hagezi' && index===1);});dns.value=kind==='adguard' ? 'adguard' : s.dns_filter==='adguard' ? 'cloudflare' : 'keep';return save(true);}
         var services=[
@@ -784,7 +799,7 @@ return view.extend({
         ];
         var cards=node('div','at-service-grid',services.map(function(service){return node('section','at-service-card',[node('h3','',label(service.title)),node('p','',label(service.description)),self.button(service.button,function(){return choose(service.key);},'primary',self.busy())]);}));
         var custom=atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Совместить фильтры или только сохранить настройки'),presets.map(function(x){return node('label','at-checkbox',[x.input,label(x.name)]);}),self.field('DNS-провайдер',dns),node('div','at-actions',[self.button('Сохранить без применения',function(){return save(false);},'ghost'),self.button('Сохранить и включить',function(){return save(true);},'primary')])]);
-        var saving=false;function save(apply){if(saving)return Promise.resolve();saving=true;msg.textContent='Сохранение настроек…';var lists=(s.remote_lists || []).map(function(x){return Object.assign({},x);});presets.forEach(function(x){var found=lists.find(function(y){return y.url===x.url && y.policy==='dnsblock';});if(found)found.enabled=x.input.checked;else if(x.input.checked)lists.push({name:x.name,url:x.url,format:x.format,policy:'dnsblock',enabled:true,section:''});});var settings=Object.assign({},s,{remote_lists:lists});if(dns.value!=='keep')settings.dns_filter=dns.value;return result(api.saveSettings(settings)).then(function(){if(!apply){ui.hideModal();return self.reload();}return (presets.some(function(x){return x.input.checked;}) ? result(api.action('refresh_lists','')).then(function(){return self.wizardWait();}) : Promise.resolve()).then(function(){return result(api.action('apply',''));}).then(function(){return self.wizardWait();}).then(function(){ui.hideModal();return self.reload();});}).catch(function(e){msg.textContent='Включение не завершилось: '+e.message+'. Настройки сохранены; проверьте сообщение и повторите включение.';}).finally(function(){saving=false;});}
+        var saving=false;function save(apply){if(saving)return Promise.resolve();saving=true;msg.textContent='Сохранение настроек…';var lists=(s.remote_lists || []).map(function(x){return Object.assign({},x);});presets.forEach(function(x){var found=lists.filter(function(y){return atlasAdblockMatch(y,x);});found.forEach(function(y,i){y.enabled=x.input.checked && i===0;});if(!found.length && x.input.checked)lists.push({name:x.name,url:x.url,format:x.format,policy:'dnsblock',enabled:true,section:''});});var settings=Object.assign({},s,{remote_lists:lists});if(dns.value!=='keep')settings.dns_filter=dns.value;return result(api.saveSettings(settings)).then(function(){if(!apply){ui.hideModal();return self.reload();}return (presets.some(function(x){return x.input.checked;}) ? result(api.action('refresh_lists','')).then(function(){return self.wizardWait();}) : Promise.resolve()).then(function(){return result(api.action('apply',''));}).then(function(){return self.wizardWait();}).then(function(){ui.hideModal();return self.reload();});}).catch(function(e){msg.textContent='Включение не завершилось: '+e.message+'. Настройки сохранены; проверьте сообщение и повторите включение.';}).finally(function(){saving=false;});}
         var selected=s.dns_filter==='adguard' ? 'AdGuard DNS' : presets.filter(function(x){return x.input.checked;}).map(function(x){return x.name;}).join(', ') || 'готовый фильтр не выбран';
         var active=((self.data.privacy || {}).checks || []).some(function(x){return x.id==='adblock' && x.ok;});
         ui.showModal('Выберите блокировку рекламы',[node('div','at-modal',[node('p','at-footnote',label('Сохранено: '+selected+'. В работающей конфигурации '+(active ? 'обнаружен DNS-фильтр.' : 'DNS-фильтр не подтверждён.'))),node('p','at-footnote',label('Нажмите кнопку выбранного сервиса: Atlas сохранит настройку, при необходимости скачает список и применит фильтрацию. Обычно достаточно одного варианта. Применение перезапускает Atlas; возможен короткий перерыв соединений.')),cards,node('p','at-footnote',label('Блокируются домены рекламы и трекеров на устройствах, использующих DNS Atlas. Собственный DoH браузера может обходить фильтр. Баннерные места на странице и реклама YouTube могут остаться: для их удаления нужно браузерное расширение. Ваши дополнительные списки и группы сохраняются.')),custom,msg]),node('div','right',[self.button('Выключить готовые фильтры',function(){return choose('none');},'ghost'),self.button('Закрыть',function(){ui.hideModal();},'ghost')])]);
@@ -1165,7 +1180,7 @@ return view.extend({
                             node('td', '', [node('strong', '', label(c.host || c.destination || 'неизвестный адрес')), node('small', '', label(c.rule ? c.rule + (c.rule_payload ? ' · ' + c.rule_payload : '') : 'Правило не указано'))]),
                             node('td', '', label(c.source || '—')),
                             node('td', '', label((c.network || '—').toUpperCase())),
-                            node('td', '', label((c.chains || []).join(' → ') || 'неизвестно')),
+                            node('td', '', label((c.chains || []).map(function(tag){return atlasRouteName(tag,self.data);}).join(' → ') || 'неизвестно')),
                             node('td', '', label('↑ ' + bytes(c.upload) + ' · ↓ ' + bytes(c.download)))
                         ]);
                     }))
