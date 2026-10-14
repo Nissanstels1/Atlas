@@ -60,7 +60,11 @@ def test_section(current, config, section_id, request):
     if not section:
         raise AtlasError('Секция не найдена')
     groups = groups_for_section(section, config)
-    members = list(dict.fromkeys(tag for group in groups for tag in group.get('outbounds', [])))
+    targets = {item['tag']: item for item in config['outbounds']}
+    # URLTest groups repeat checks for their entire pool; policy-block is an
+    # intentional rejection, not a failed server. Check each concrete member once.
+    members = list(dict.fromkeys(tag for group in groups for tag in group.get('outbounds', [])
+                                if targets.get(tag, {}).get('type') not in ('selector', 'urltest', 'block', 'dns')))
     if not members:
         raise AtlasError('В секции нет группы серверов для проверки')
     query = urlencode({'timeout':5000, 'url':section.get('urltest_url') or current['settings']['urltest_url']})

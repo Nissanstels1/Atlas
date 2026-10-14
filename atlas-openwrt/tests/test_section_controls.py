@@ -119,6 +119,8 @@ class Controls(unittest.TestCase):
         request=Mock(return_value={'delay':12})
         results=test_section(state,cfg,sid,request)
         self.assertTrue(results);self.assertTrue(all('/delay?' in c.args[1] for c in request.call_args_list))
+        self.assertEqual(set(results),{'section_'+sid+'_one','section_'+sid+'_two'})
+        self.assertEqual(request.call_count,2)
 
     def test_file_list_paths_reject_traversal_and_remote_authority(self):
         self.assertEqual(core.rule_list_url('file:///mnt/usb/list.txt'),'file:///mnt/usb/list.txt')

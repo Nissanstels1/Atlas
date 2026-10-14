@@ -759,11 +759,7 @@ def service_running(name='atlas'):
 
 
 def engine_version():
-    try:
-        r = run([BINARY, 'version'], 4)
-        return r.stdout.decode().splitlines()[0][:100] if r.returncode == 0 else None
-    except (OSError, IndexError, subprocess.TimeoutExpired):
-        return None
+    return __import__('engine_features').version_info(BINARY)['version']
 
 
 def system_interfaces():

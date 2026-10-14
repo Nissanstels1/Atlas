@@ -8,6 +8,8 @@ from test_selection import sample
 FEATURES=['urltest.fallbacks','urltest.download_url','tools.decode-link']
 
 class EngineFeatures(unittest.TestCase):
+    def setUp(self):engine_features._version_cache.clear()
+    def tearDown(self):engine_features._version_cache.clear()
     def test_sidecar_is_selected_without_replacing_stock_binary(self):
         with mock.patch.dict(os.environ,{},clear=True),mock.patch.object(engine_features.os,'access',return_value=True):self.assertEqual(engine_features.binary_path(),'/usr/lib/atlas-engine/bin/atlas-engine')
         with mock.patch.dict(os.environ,{},clear=True),mock.patch.object(engine_features.os,'access',return_value=False):self.assertEqual(engine_features.binary_path(),'/usr/bin/sing-box')
@@ -21,6 +23,7 @@ class EngineFeatures(unittest.TestCase):
     def test_version_features_and_stock_fallback(self):
         with mock.patch.object(engine_features.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'sing-box version 1.13.21\nFeatures: urltest.fallbacks,tools.decode-link,urltest.fallbacks\n')):
             self.assertEqual(engine_features.capabilities(),['tools.decode-link','urltest.fallbacks'])
+        engine_features._version_cache.clear()  # A separate CLI request.
         with mock.patch.object(engine_features.subprocess,'run',side_effect=FileNotFoundError):self.assertEqual(engine_features.capabilities(),[])
 
     def test_global_reserve_order_and_download_url(self):

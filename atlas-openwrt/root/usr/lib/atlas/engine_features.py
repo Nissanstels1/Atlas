@@ -1,9 +1,51 @@
-"""Optional engine capabilities. No package-name assumptions or persistent cache."""
+"""Optional engine capabilities, with a bounded in-process version snapshot."""
+from collections import OrderedDict
 import json
 import os
 import re
 import subprocess
 import tempfile
+import time
+
+_version_cache = OrderedDict()
+
+
+def version_info(binary=None):
+    """Reuse successful version output only while the same executable exists.
+
+    CLI requests live in separate processes. No cache file survives an upgrade
+    or reboot; stat identity also detects a replacement during a long worker.
+    """
+    binary = os.fspath(binary or binary_path())
+    identity = None
+    try:
+        stat = os.stat(binary)
+        identity = (os.path.realpath(binary), stat.st_dev, stat.st_ino,
+                    stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_mode)
+    except OSError:
+        _version_cache.clear()
+    now = time.monotonic()
+    cached = _version_cache.get(identity) if identity is not None else None
+    if cached and 0 <= now - cached[0] < 30:
+        _version_cache.move_to_end(identity)
+        return {'version': cached[1], 'features': list(cached[2])}
+    try:
+        value = subprocess.run([binary, 'version'], stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, timeout=3)
+        if value.returncode:
+            return {'version': None, 'features': []}
+        lines = value.stdout[:16384].splitlines()
+        version = lines[0][:100] if lines else None
+        raw = next((x.partition(':')[2] for x in lines if x.startswith('Features:')), '')
+        features = sorted(set(x.strip() for x in raw.split(',') if re.fullmatch(r'[a-zA-Z0-9_.-]{1,80}', x.strip())))[:128]
+        if identity is not None and version:
+            _version_cache[identity] = (now, version, tuple(features))
+            _version_cache.move_to_end(identity)
+            while len(_version_cache) > 4:
+                _version_cache.popitem(last=False)
+        return {'version': version, 'features': features}
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
+        return {'version': None, 'features': []}
 
 
 def binary_path():
@@ -11,15 +53,7 @@ def binary_path():
 
 
 def capabilities(binary=None):
-    binary = binary or binary_path()
-    try:
-        value = subprocess.run([binary, 'version'], capture_output=True, text=True, timeout=3)
-        if value.returncode: return []
-        lines = value.stdout[:16384].splitlines()
-        raw = next((x.partition(':')[2] for x in lines if x.startswith('Features:')), '')
-        return sorted(set(x.strip() for x in raw.split(',') if re.fullmatch(r'[a-zA-Z0-9_.-]{1,80}', x.strip())))[:128]
-    except (OSError, subprocess.TimeoutExpired):
-        return []
+    return version_info(binary)['features']
 
 
 def decode_link(link, binary=None):

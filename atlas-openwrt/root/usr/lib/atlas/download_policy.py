@@ -55,6 +55,13 @@ class DownloadPolicy:
                 remaining=[node for node in remaining if node['key']!=key]
                 continue
             elif self.calls>=4 or time.monotonic()>=self.deadline:
+                # Checking a new, faster candidate must not discard an existing
+                # selection whose same-generation proof and RTT still qualify.
+                selected=[node for node in remaining if node['key']==previous]
+                if selected and rank(selected,settings,proxies)==previous:
+                    previous_identity=hashlib.sha256((self.generation+'\0'+previous+'\0'+self.signature(url)).encode()).hexdigest()
+                    if self.round.get(previous_identity) is not False and self.fresh(previous_identity):
+                        return previous,'verified-budget-reused'
                 return 'policy-block','check-budget'
             else:
                 self.calls+=1

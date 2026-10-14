@@ -1,5 +1,8 @@
 import time,unittest
 from unittest import mock
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'root/usr/lib/atlas'))
 import atlas,core,sections
 from test_expert_sections import sample
 from test_independent_sections import sec
@@ -46,4 +49,4 @@ class SelectionRecheck(unittest.TestCase):
         current['settings']=core.validate_settings(current['settings']);cfg=core.make_config(current,tun=False)
         nodes={n['key'] for n in core.all_nodes(current)}
         result=sections.test_section(current,cfg,'a'*16,lambda *args,**kwargs:{'delay':1})
-        self.assertEqual(len(nodes),1024);self.assertTrue(nodes.issubset(result))
+        self.assertEqual(len(nodes),1024);self.assertEqual(nodes,set(result))
