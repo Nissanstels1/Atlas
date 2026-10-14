@@ -1264,10 +1264,12 @@ def validate_source_rules(body):
 
 
 def store_rule_set(current, item, body, source=False):
-    if source:validate_source_rules(body)
     target=DATA/'rules'/(item['id']+('.json' if source else '.srs'))
     previous=target.read_bytes() if target.exists() else None
     previous_item=copy.deepcopy(item)
+    if previous == body and item.get('source_cached', False) == source and item.get('srs_cached', False) == (not source):
+        return False
+    if source:validate_source_rules(body)
     atomic_bytes(target,body)
     item.update(source_cached=source,srs_cached=not source,domains=[],cidrs=[])
     if source:item['source_rules']=json.loads(body)
@@ -1280,6 +1282,7 @@ def store_rule_set(current, item, body, source=False):
         item.clear();item.update(previous_item)
         if isinstance(exc,AtlasError):raise
         raise AtlasError('Не удалось проверить набор правил движком') from exc
+    return True
 
 
 def _validator(value):
@@ -1405,7 +1408,62 @@ def apply(current, enable=False):
         raise
 
 
-def refresh(current, sub_id='', lists_only=False):
+def refresh_source_key(kind, source):
+    return kind + ':' + source.get('id', '') + ':' + hashlib.sha256(source.get('url', '').encode()).hexdigest()[:16]
+
+
+def source_due(source, interval, retry=None, now=None, monotonic=None):
+    now = time.time() if now is None else now
+    monotonic = time.monotonic() if monotonic is None else monotonic
+    # A newly edited local file is immediately due. The same failed version
+    # (including a missing file) still respects its retry pause.
+    changed = False
+    if source.get('url', '').startswith('file:///'):
+        version = local_rule_version(source['url'])
+        changed = version != source.get('file_version', '')
+        if changed and (not retry or version != retry.get('file_version')):
+            return True
+    if retry and 0 <= monotonic - retry.get('attempted', 0) < retry.get('delay', 0):
+        return False
+    updated = source.get('updated', 0)
+    return changed or updated <= 0 or now < updated or now - updated >= interval
+
+
+def refresh_due(current):
+    interval = current['settings']['interval_hours'] * 3600
+    retries = read_json(RUN / 'refresh-retries.json', {})
+    return any(source_due(x, interval, retries.get(refresh_source_key(kind, x)))
+               for kind, sources in (('subscription', current['subscriptions']), ('list', current['settings']['remote_lists']))
+               for x in sources if x.get('enabled', True) and x.get('source') != 'local')
+
+
+def refresh_signature(current):
+    # Only fields changed by refresh which can affect routing or engine choice.
+    return [(sub['id'], sub.get('enabled', True), [
+        {key: value for key, value in node.items() if key != 'country_verified_at'}
+        for node in sub.get('nodes', [])]) for sub in current['subscriptions']], [
+        {key: value for key, value in item.items() if key not in
+         ('updated', 'error', 'count', 'file_version')}
+        for item in current['settings']['remote_lists']]
+
+
+def refresh(current, sub_id='', lists_only=False, due_only=False):
+    before = copy.deepcopy(refresh_signature(current))
+    rules_changed = False
+    interval = current['settings']['interval_hours'] * 3600
+    retries = read_json(RUN / 'refresh-retries.json', {})
+    valid = {refresh_source_key(kind, x) for kind, sources in (('subscription', current['subscriptions']), ('list', current['settings']['remote_lists'])) for x in sources if x.get('enabled', True)}
+    retries = {key: value for key, value in retries.items() if key in valid}
+    def attempted(kind, item, ok):
+        key = refresh_source_key(kind, item)
+        if ok:
+            retries.pop(key, None)
+        else:
+            failures = min(5, retries.get(key, {}).get('failures', 0) + 1)
+            retries[key] = {'attempted': time.monotonic(), 'failures': failures, 'delay': min(900, 60 * 2 ** (failures - 1))}
+            if item.get('url', '').startswith('file:///'):
+                retries[key]['file_version'] = local_rule_version(item['url'])
+        atomic(RUN / 'refresh-retries.json', retries)
     found = False
     successes, failures, list_successes = 0, [], 0
     for sub in current['subscriptions']:
@@ -1416,6 +1474,8 @@ def refresh(current, sub_id='', lists_only=False):
         if not sub.get('enabled', True):
             continue
         if sub.get('source') == 'local':
+            continue
+        if due_only and not source_due(sub, interval, retries.get(refresh_source_key('subscription', sub))):
             continue
         found = True
         try:
@@ -1429,6 +1489,7 @@ def refresh(current, sub_id='', lists_only=False):
                 sub.update({'updated': int(time.time()), 'etag': etag, 'last_modified': last_modified, 'error': ''})
                 sub['change'] = {'added': 0, 'removed': 0, 'total': len(sub.get('nodes', [])), 'unchanged': True}
                 successes += 1
+                attempted('subscription', sub, True)
                 continue
             parsed = parse_subscription(body)
             old_nodes = {x.get('id'): x for x in sub.get('nodes', [])}
@@ -1439,10 +1500,11 @@ def refresh(current, sub_id='', lists_only=False):
                         node[key] = previous[key]
             old_ids = {x.get('id') for x in sub.get('nodes', [])}
             new_ids = {x.get('id') for x in parsed['nodes']}
-            proposed = copy.deepcopy(current)
-            dest = next(x for x in proposed['subscriptions'] if x['id'] == sub['id'])
+            # Validate this source without copying every other profile/list.
+            dest = copy.deepcopy(sub)
             dest.update(parsed)
-            if sum(len(x.get('nodes', [])) for x in proposed['subscriptions']) > MAX_TOTAL_NODES:
+            total = len(dest['nodes']) + sum(len(x.get('nodes', [])) for x in current['subscriptions'] if x['id'] != sub['id'])
+            if total > MAX_TOTAL_NODES:
                 raise AtlasError('Общий архив превышает 4096 профилей. Удалите старые или лишние подписки.')
             # Validate each subscription independently, even if selection points to an old node.
             validation = defaults()
@@ -1454,12 +1516,16 @@ def refresh(current, sub_id='', lists_only=False):
                         'change': {'added': len(new_ids - old_ids), 'removed': len(old_ids - new_ids),
                                    'total': len(new_ids), 'unchanged': not (new_ids - old_ids or old_ids - new_ids)}})
             successes += 1
+            attempted('subscription', sub, True)
         except AtlasError as exc:
+            attempted('subscription', sub, False)
             sub['error'] = str(exc)
             failures.append(sub['name'])
     if not sub_id:
         for rule_list in current['settings']['remote_lists']:
             if not rule_list['enabled']:
+                continue
+            if due_only and not source_due(rule_list, interval, retries.get(refresh_source_key('list', rule_list))):
                 continue
             found = True
             try:
@@ -1469,12 +1535,12 @@ def refresh(current, sub_id='', lists_only=False):
                 if current['settings'].get('list_max_bytes',MAX_BYTES)!=MAX_BYTES:
                     permissions['max_bytes']=current['settings']['list_max_bytes']
                 if rule_list['format']=='srs':
-                    store_rule_set(current,rule_list,fetch_rule_set(rule_list['url'],proxy_url=list_proxy,**permissions))
+                    rules_changed = store_rule_set(current,rule_list,fetch_rule_set(rule_list['url'],proxy_url=list_proxy,**permissions)) or rules_changed
                     rule_list.update(count=0)
                 else:
                     parsed=fetch_rule_list(rule_list['url'],rule_list['format'],proxy_url=list_proxy,**permissions)
                     if isinstance(parsed,dict):
-                        store_rule_set(current,rule_list,json.dumps(parsed).encode(),source=True)
+                        rules_changed = store_rule_set(current,rule_list,json.dumps(parsed).encode(),source=True) or rules_changed
                         rule_list.update(count=len(parsed['rules']))
                     else:
                         domains,cidrs=parsed
@@ -1482,22 +1548,27 @@ def refresh(current, sub_id='', lists_only=False):
                         rule_list.pop('source_rules',None)
                 rule_list.update(file_version=file_version,updated=int(time.time()),error='')
                 list_successes += 1
+                attempted('list', rule_list, True)
             except AtlasError as exc:
+                attempted('list', rule_list, False)
                 # Keep last known good rules when a list server is temporarily unavailable.
                 rule_list['error'] = text(str(exc), 160)
                 failures.append(rule_list['name'])
     if not found:
+        if due_only:
+            return 'Все источники обновлены; новые попытки пока не нужны'
         if any(x.get('source') == 'local' and x.get('enabled', True) and
                (not sub_id or x['id'] == sub_id) for x in current['subscriptions']):
             return 'Локальные профили не требуют сетевого обновления'
         raise AtlasError('Нет включённых подписок или списков правил для обновления')
     atomic(STATE, current)
-    if (successes or list_successes) and not lists_only and service_running():
+    changed = rules_changed or before != refresh_signature(current)
+    if changed and (successes or list_successes) and not lists_only and service_running():
         apply(current)
     maintain_artifacts(current)
     if failures:
         raise AtlasError('Не обновлено источников: %d. Предыдущие узлы и правила сохранены; подробности в карточках.' % len(failures))
-    return 'Обновлено подписок: %d, списков правил: %d' % (successes, list_successes)
+    return ('Обновлено подписок: %d, списков правил: %d' % (successes, list_successes)) + (' · маршруты не изменились, перезапуск не нужен' if not changed else '')
 
 
 def site_probe(node,settings,website,deadline):
@@ -1826,12 +1897,35 @@ def privacy_egress_test(node, direct_check=direct_public_ip, proxy_check=proxied
                 'error': 'Не удалось выполнить внешний тест IP. Адреса ответов не сохраняются.'}
 
 
+def process_identity(pid):
+    """Linux start ticks distinguish a worker from a later reuse of its PID."""
+    if type(pid) is not int or pid <= 1:
+        return ''
+    try:
+        fields = Path('/proc/%d/stat' % pid).read_text().rsplit(')', 1)[1].split()
+        return fields[19] if fields[0] not in ('Z', 'X') else ''
+    except (OSError, IndexError):
+        return ''
+
+
 def active_job():
     job = read_json(RUN / 'job.json', {})
     if job.get('status') in ('queued', 'running'):
-        try:
-            os.kill(job.get('pid', -1), 0)
-        except (OSError, TypeError):
+        pid = job.get('pid')
+        alive = type(pid) is int and pid > 1
+        if alive:
+            try:
+                os.kill(pid, 0)
+                identity = process_identity(pid)
+                # Older jobs have no identity. Validate their exact worker command.
+                if job.get('process_identity'):
+                    alive = identity == job['process_identity']
+                else:
+                    command = Path('/proc/%d/cmdline' % pid).read_bytes().split(b'\0')
+                    alive = bool(identity) and [SCRIPT.encode(), b'worker', str(job.get('id', '')).encode()] == command[1:4]
+            except (OSError, TypeError):
+                alive = False
+        if not alive:
             job.update(status='error', message='Операция прервана. Можно повторить.')
     return job
 
@@ -2434,6 +2528,8 @@ def dispatch(method, args):
                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                      start_new_session=True, close_fds=True)
             job['pid'] = child.pid
+            job['process_identity'] = process_identity(child.pid)
+            job['scheduled'] = args.get('scheduled') is True
             atomic(RUN / 'job.json', job)
             return {'ok': True, 'job': job['id']}
         else:
@@ -2458,7 +2554,7 @@ def worker(job_id):
                 atomic(RUN / ('section-check-' + job['subscription'] + '.json'), results)
                 message = 'Замеры секции: доступны %d из %d' % (sum(isinstance(x,dict) and x.get('delay',0)>0 for x in results.values()),len(results))
             elif op == 'refresh':
-                message = refresh(current, job['subscription'])
+                message = refresh(current, job['subscription'], due_only=True) if job.get('scheduled') else refresh(current, job['subscription'])
             elif op == 'refresh_lists':
                 message = refresh(current, lists_only=True)
             elif op in ('apply', 'start'):
@@ -2704,11 +2800,9 @@ def main():
                     automatic_select(current)
         except AtlasError:
             pass
-        interval = current['settings']['interval_hours'] * 3600
-        due = any(s.get('source') != 'local' and s.get('enabled', True) and time.time() - s.get('updated', 0) >= interval for s in current['subscriptions']) or any(x.get('enabled') and (time.time() - x.get('updated', 0) >= interval or (x['url'].startswith('file:///') and local_rule_version(x['url']) != x.get('file_version',''))) for x in current['settings']['remote_lists'])
-        if due:
+        if refresh_due(current):
             try:
-                dispatch('action', {'operation': 'refresh'})
+                dispatch('action', {'operation': 'refresh', 'scheduled': True})
             except AtlasError:
                 pass
         return
