@@ -1927,9 +1927,9 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
 
     return config
 
-def privacy_checks(settings, config, running=False):
+def privacy_checks(settings, config, running=False, validated=False):
     """Report observable Atlas safeguards; this is not a third-party leak test."""
-    settings = validate_settings(settings)
+    settings = settings if validated else validate_settings(settings)
     dns = config.get('dns', {}) if isinstance(config, dict) else {}
     servers = dns.get('servers', [])
     rules = dns.get('rules', [])

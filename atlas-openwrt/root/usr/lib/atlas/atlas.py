@@ -279,13 +279,14 @@ def runtime_status(nodes, running):
             raise AtlasError('Ответ локального API слишком большой')
         proxies = normalized_proxies(json.loads(raw).get('proxies'))
         result = decode_runtime(proxies, nodes)
+        members = {n['key']: n for n in nodes}
         groups = []
         for tag in sorted(proxies):
             if re.fullmatch(r'pool_[a-f0-9]{16}', tag):
                 current = proxies[tag].get('now')
                 if current == 'auto_' + tag[5:]:
                     current = proxies.get(current, {}).get('now')
-                member = next((n for n in nodes if n['key'] == current), None)
+                member = members.get(current)
                 groups.append({'group': tag, 'blocked': current == 'policy-block',
                                'selected': member['key'] if member else None,
                                'name': member['name'] if member else 'Заблокирован' if current == 'policy-block' else 'Выбор пока неизвестен'})
@@ -1958,14 +1959,21 @@ def public_status():
             active_config = make_config(current) if raw_nodes or any(x.get('outbound_config') and x.get('enabled', True) for x in current['settings']['sections']) else make_config(current, tun=False, probe_node=fallback)
         except AtlasError:
             active_config = make_config(current, tun=False, probe_node=fallback)
-    privacy = privacy_checks(current['settings'], active_config, running)
+    privacy = privacy_checks(current['settings'], active_config, running, validated=True)
     dhcp_enabled = current['settings'].get('dhcp_dns_enabled', False)
     dhcp_active = dhcp_dns_active() if dhcp_enabled else False
     privacy['checks'].append({'id': 'dhcp_dnsmasq', 'ok': not dhcp_enabled or dhcp_active,
                               'label': 'dnsmasq направляет DNS в Atlas' if dhcp_enabled and dhcp_active else
                                        'DNS dnsmasq не перенаправлен в Atlas' if dhcp_enabled else
                                        'Интеграция DNS с dnsmasq выключена'})
-    public_settings = copy.deepcopy(current['settings'])
+    # Cached rule bodies can contain hundreds of thousands of entries. They
+    # are never public: project them out before copying the status response.
+    public_settings = copy.deepcopy({k: v for k, v in current['settings'].items() if k != 'remote_lists'})
+    public_settings['remote_lists'] = []
+    for source in current['settings'].get('remote_lists', []):
+        item = copy.deepcopy({k: v for k, v in source.items() if k not in ('domains', 'cidrs', 'source_rules')})
+        item['count'] = source.get('count', 0) if rule_set_format(source) else len(source.get('domains', [])) + len(source.get('cidrs', []))
+        public_settings['remote_lists'].append(item)
     public_settings.pop('mixed_proxy_password', None)
     for section in public_settings.get('sections', []):
         section['mixed_proxy'].pop('password', None)
@@ -1983,10 +1991,6 @@ def public_status():
                 source['adblock_preset'] = preset
         parsed = urlsplit(source['url'])
         source['url'] = source['url'] if parsed.scheme == 'file' else '%s://%s/[saved]' % (parsed.scheme, parsed.hostname)
-        source['count'] = source.get('count', 0) if rule_set_format(source) else len(source.get('domains', [])) + len(source.get('cidrs', []))
-        source.pop('domains', None)
-        source.pop('cidrs', None)
-        source.pop('source_rules', None)
     return {'ok': True, 'running': running, 'engine': engine_version(), 'engine_features': __import__('engine_features').capabilities(BINARY),
             'subscriptions': subscriptions, 'nodes': nodes, 'interfaces': sorted(system_interfaces()), 'settings': public_settings,
             'runtime': runtime_status(raw_nodes, running), 'eligible_count': len(eligible),
