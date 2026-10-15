@@ -75,6 +75,22 @@ function atlasRouteName(tag,data) {
     if(section){var member=(data.nodes || []).find(function(n){return tag==='section_'+section.id+'_'+n.key;});return member ? member.name+' · '+section.name : 'Секция: '+section.name;}
     return tag;
 }
+function atlasSectionChoice(section,data,staged) {
+    var settings=data.settings || {},choices=settings.section_choices || {},prefix='section_'+section.id+'_';
+    var oldTag=Array.isArray(section.pools) || !section.name ? '' : section.pool ? 'pool_'+section.pool : 'proxy';
+    var choice=staged || choices[prefix+'control'] || choices[oldTag] || (oldTag==='proxy' ? settings.selected : 'auto') || 'auto';
+    if(choice==='auto' || /^auto_/.test(choice) || choice===prefix+'auto')return 'auto';
+    return choice.indexOf(prefix)===0 ? choice.slice(prefix.length) : choice;
+}
+function atlasSectionConnection(section,data,staged) {
+    if(section.policy!=='proxy')return '';
+    if(section.outbound_config_set || (section.outbound_config || []).length)return 'Свой JSON выход';
+    var choice=atlasSectionChoice(section,data,staged),profile=(data.nodes || []).find(function(n){return n.key===choice;});
+    var source='Общий пул';
+    if(Array.isArray(section.pools))source=section.pools.length ? 'Подписок: '+section.pools.length : 'Все подписки';
+    else if(section.pool){var subscription=(data.subscriptions || []).find(function(s){return s.id===section.pool;});source=subscription ? subscription.name : 'Подписка недоступна';}
+    return (choice==='auto' ? 'Автовыбор' : 'Закреплён: '+(profile ? profile.name : 'сохранённый профиль'))+' · '+source;
+}
 
 function label(t) { return document.createTextNode(String(t)); }
 function pill(t, cls) { return node('span', 'at-pill ' + (cls || ''), label(t)); }
@@ -835,10 +851,7 @@ return view.extend({
             var poolChoices=node('div','at-pool-choices',poolChecks.map(function(x){return node('label','at-checkbox',[x.input,label(x.name)]);}));
             function poolVisibility(){poolChoices.hidden=policy.value!=='proxy' || pool.value!=='multiple';}pool.addEventListener('change',poolVisibility);poolVisibility();
 
-            var ownTag='section_'+original.id+'_control',oldTag=Array.isArray(original.pools) || !original.name ? '' : original.pool ? 'pool_'+original.pool : 'proxy';
-            var prior=(listContext && listContext.choice ? listContext.choice(original.id) : '') || (self.data.settings.section_choices || {})[ownTag] || (self.data.settings.section_choices || {})[oldTag] || (oldTag==='proxy' ? self.data.settings.selected : 'auto') || 'auto';
-            if(/^auto_/.test(prior) || prior==='section_'+original.id+'_auto')prior='auto';
-            if(prior.indexOf('section_'+original.id+'_')===0)prior=prior.slice(('section_'+original.id+'_').length);
+            var prior=atlasSectionChoice(original,self.data,listContext && listContext.choice ? listContext.choice(original.id) : undefined);
             var choiceMode=node('select','at-input at-section-choice-mode',[atlasElement('option',{value:'auto',selected:prior==='auto'},'Автоматически'),atlasElement('option',{value:'manual',selected:prior!=='auto'},'Один выбранный профиль')]);
             var chosen=node('select','at-input at-section-chosen',[]),chooseBox=node('div','at-section-choice-box');
             function redrawChoice(){var selected=chosen.value || prior,ids=pool.value==='multiple' ? poolChecks.filter(function(x){return x.input.checked;}).map(function(x){return x.id;}) : pool.value && pool.value!=='all' ? [pool.value] : [];var candidates=(self.data.nodes || []).filter(function(n){return n.eligible!==false && (!ids.length || ids.indexOf(n.key.slice(0,16))>=0);});chosen.replaceChildren.apply(chosen,[atlasElement('option',{value:'',selected:!candidates.some(function(n){return n.key===selected;})},'Выберите профиль')].concat(candidates.map(function(n){return atlasElement('option',{value:n.key,selected:n.key===selected},n.name+' · '+n.subscription);})));chosen.value=candidates.some(function(n){return n.key===selected;}) ? selected : '';chooseBox.replaceChildren(self.field('Способ выбора сервера',choiceMode,'Автоматически — Atlas проверяет кандидатов и меняет сервер этой секции. Один профиль — фиксированный сервер, автоматической замены нет.'));if(choiceMode.value==='manual')chooseBox.appendChild(self.field('Профиль этой секции',chosen));}
@@ -954,7 +967,8 @@ return view.extend({
             serializedSections = sections.value;
             sectionList.replaceChildren.apply(sectionList, sectionDraft.map(function(x, index) {
                 function move(delta) { var other = index + delta; if (other < 0 || other >= sectionDraft.length) return; var saved=sectionDraft[index];sectionDraft[index]=sectionDraft[other];sectionDraft[other]=saved;syncSections(); }
-                return node('article', 'at-card at-padded at-section-summary', [node('strong', '', label(x.name)), node('p', 'at-footnote', label((x.enabled === false ? 'Выключена · ' : '') + ({proxy:'Прокси',direct:'Напрямую',exclude:'Исключение',block:'Блокировать',interface:'VPN'}[x.policy] || x.policy) + (x.outbound_config_set || (x.outbound_config || []).length ? ' · JSON outbound' : '') + (x.mixed_proxy && x.mixed_proxy.enabled ? ' · HTTP/SOCKS ' + x.mixed_proxy.listen + ':' + x.mixed_proxy.port : ''))), node('p','at-footnote',label((x.domains || []).slice(0,4).join(', ')+(x.domains && x.domains.length>4 ? ' и ещё '+(x.domains.length-4) : '')+' · списков: '+sectionSources.get().filter(function(l){return l.section===x.id;}).length+' · '+(x.site_checks && x.site_checks.length ? 'Автовыбор по доступности '+x.site_checks.length+' сайтов' : x.policy==='proxy' ? 'Общая проверка профилей' : 'Профиль не требуется'))),node('div','at-actions',[
+                var connection=atlasSectionConnection(x,d,sectionSelections[x.id]);
+                return node('article', 'at-card at-padded at-section-summary', [node('strong', '', label(x.name)), node('p', 'at-footnote', label((x.enabled === false ? 'Выключена · ' : '') + ({proxy:'Прокси',direct:'Напрямую',exclude:'Исключение',block:'Блокировать',interface:'VPN'}[x.policy] || x.policy) + (connection ? ' · '+connection : '') + (x.mixed_proxy && x.mixed_proxy.enabled ? ' · HTTP/SOCKS ' + x.mixed_proxy.listen + ':' + x.mixed_proxy.port : ''))), node('p','at-footnote',label((x.domains || []).slice(0,4).join(', ')+(x.domains && x.domains.length>4 ? ' и ещё '+(x.domains.length-4) : '')+' · списков: '+sectionSources.get().filter(function(l){return l.section===x.id;}).length+' · '+(x.site_checks && x.site_checks.length ? 'Проверка сайтов: '+x.site_checks.length : x.policy==='proxy' ? 'HTTPS-проверка профилей' : 'Профиль не требуется'))),node('div','at-actions',[
                     self.button('Настроить секцию', function() { return self.sectionDialog(x, function(value) { if(sectionDraft.some(function(y,i){return i!==index&&y.name.toLowerCase()===value.name.toLowerCase();})) throw new Error('Название секции уже используется');sectionDraft[index]=value;syncSections(); },sectionSources); }, '', self.busy()),
                     self.button('Копировать',function(){self.cloneSectionDialog(x);},'ghost',self.busy()||!x.id),
                     self.button('↑',function(){move(-1);},'ghost',index===0||self.busy()),self.button('↓',function(){move(1);},'ghost',index===sectionDraft.length-1||self.busy()),

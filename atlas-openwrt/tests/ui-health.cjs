@@ -1,6 +1,6 @@
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const source=fs.readFileSync(path.join(__dirname,'../root/www/luci-static/resources/view/atlas/overview.js'),'utf8');
-const h=new Function(source.slice(source.indexOf('function atlasElement'),source.indexOf('return view.extend({'))+'return {atlasHelp,atlasProfileHealth,atlasCommunityLists,atlasSelectableLists};')();
+const h=new Function(source.slice(source.indexOf('function atlasElement'),source.indexOf('return view.extend({'))+'return {atlasHelp,atlasProfileHealth,atlasCommunityLists,atlasSelectableLists,atlasSectionChoice,atlasSectionConnection};')();
 const now=new Date().toISOString(),old=new Date(Date.now()-600000).toISOString();
 const data={running:true,settings:{auto_interval_seconds:60},nodes:[{key:'a'},{key:'b'},{key:'c'},{key:'d'},{key:'e',eligible:false}],runtime:{available:true,measurements:{a:{ok:true,latency_ms:150,checked_at:now},b:{ok:true,latency_ms:160,checked_at:old},c:{ok:false,latency_ms:0,checked_at:now},e:{ok:true,latency_ms:100,checked_at:now}}},checks:{d:{ok:true,latency_ms:10,checked:Date.now()/1000}}};
 const health=h.atlasProfileHealth(data);
@@ -20,3 +20,19 @@ console.log('PASS: automatic status ignores manual tests, separates fresh/stale/
 
 assert.equal(h.atlasCommunityLists().length,25);assert(h.atlasCommunityLists().some(x=>x[0]==='google_meet'));
 assert.equal(h.atlasSelectableLists({list_catalogue:[{id:'a'.repeat(16),name:'User source'}]}).length,26);
+
+const sid='a'.repeat(16),sub='b'.repeat(16),key='b'.repeat(32),section={id:sid,name:'Videos',policy:'proxy',pool:'',pools:[]};
+const choices={settings:{selected:key,section_choices:{}},subscriptions:[{id:sub,name:'Provider'}],nodes:[{key,name:'Profile'}]};
+assert.equal(h.atlasSectionConnection(section,choices),'Автовыбор · Все подписки');
+assert.equal(h.atlasSectionConnection({...section,pools:[sub]},choices),'Автовыбор · Подписок: 1');
+assert.equal(h.atlasSectionConnection(section,choices,key),'Закреплён: Profile · Все подписки');
+assert.equal(h.atlasSectionChoice(section,choices,'section_'+sid+'_'+key),key);
+assert.equal(h.atlasSectionChoice(section,choices,'section_'+sid+'_auto'),'auto');
+assert.equal(h.atlasSectionConnection({...section,pools:null},choices),'Закреплён: Profile · Общий пул');
+choices.settings.section_choices['pool_'+sub]=key;
+assert.equal(h.atlasSectionConnection({...section,pools:null,pool:sub},choices),'Закреплён: Profile · Provider');
+choices.settings.section_choices['pool_'+sub]='auto_'+sub;
+assert.equal(h.atlasSectionConnection({...section,pools:null,pool:sub},choices),'Автовыбор · Provider');
+assert.equal(h.atlasSectionConnection({...section,outbound_config_set:true},choices),'Свой JSON выход');
+assert.equal(h.atlasSectionConnection({...section,policy:'direct'},choices),'');
+console.log('PASS: section cards and editor agree on independent/shared/manual/automatic/custom connections and staged selections.');
