@@ -4,7 +4,7 @@
     "order": 30,
     "action": {
       "type": "view",
-      "path": "atlas/overview_881c4e4f"
+      "path": "atlas/overview_b15d6544"
     },
     "depends": {
       "acl": [

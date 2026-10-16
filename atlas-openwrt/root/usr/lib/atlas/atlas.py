@@ -36,7 +36,7 @@ from urllib.parse import urlsplit, quote, urlencode
 from download_policy import DownloadPolicy
 from site_policy import SitePolicy
 from security import compare_client, fingerprint
-from core import AtlasError, MAX_BYTES, MAX_RULE_LIST_ENTRIES, MAX_SUBSCRIPTIONS, MAX_TOTAL_NODES, all_nodes, custom_auto_policy, real_ip_resolution_active, country_for_node, country_source_for_node, defaults, filter_nodes, host, make_config, parse_subscription, privacy_checks, rule_set_format, rule_list_url, selection_nodes, subscription_headers, subscription_url, text, validate_settings
+from core import AtlasError, MAX_BYTES, MAX_RULE_LIST_ENTRIES, MAX_SUBSCRIPTIONS, MAX_TOTAL_NODES, all_nodes, custom_auto_policy, real_ip_resolution_active, country_for_node, country_source_for_node, defaults, filter_nodes, host, make_config, parse_subscription, privacy_checks, rank_auto_candidates, rule_set_format, rule_list_url, section_node_prefix, selection_nodes, subscription_headers, subscription_url, text, validate_settings
 
 DATA = Path('/etc/atlas')
 RUN = Path('/var/run/atlas')
@@ -427,7 +427,7 @@ def clash_request(method='GET', path='/proxies', body=None, timeout=2):
         connection.close()
 
 
-def auto_choice(nodes, settings, proxies, now=None):
+def auto_choice(nodes, settings, proxies, now=None, previous=None):
     """Return best measured filtered node, or None when evidence is stale/absent."""
     now = int(now or time.time())
     preferred = settings['preferred_countries']
@@ -477,7 +477,7 @@ def auto_choice(nodes, settings, proxies, now=None):
         # eligible only after every primary failed these same fresh criteria.
         reserve_rank = reserve_order.get(node['key'], 0)
         candidates.append((reserve_rank, country_rank, score, recent, node['key']))
-    return min(candidates)[4] if candidates else None
+    return rank_auto_candidates(candidates, settings, previous)
 
 
 def automatic_select(current):
@@ -500,15 +500,18 @@ def automatic_select(current):
             tag='section_'+section['id']+'_control'
             if section['enabled'] and not section['outbound_config'] and tag in proxies and tag not in settings.get('section_choices',{}):
                 members=[n for n in nodes if (not section.get('pools') or n['key'][:16] in section['pools']) and (not section['pool'] or n['key'].startswith(section['pool']))]
-                if section['udp_over_tcp'] is not None or section['udp_over_tcp_version'] is not None:
-                    members=[dict(n,key='section_'+section['id']+'_'+n['key']) for n in members]
+                prefix=section_node_prefix(section,settings)
+                if prefix:
+                    members=[dict(n,key=prefix+n['key']) for n in members]
                 policy=dict(settings)
                 for field in ('urltest_fallbacks','urltest_download_check','urltest_download_url','site_checks'):
                     policy[field]=section.get(field, [] if field=='urltest_fallbacks' else 'default' if field=='urltest_download_check' else '')
-                if section['udp_over_tcp'] is not None or section['udp_over_tcp_version'] is not None:
-                    policy['urltest_fallbacks']=['section_'+section['id']+'_'+key for key in policy['urltest_fallbacks']]
+                if prefix:
+                    policy['urltest_fallbacks']=[prefix+key for key in policy['urltest_fallbacks']]
                 if section['auto_interval_seconds'] is not None:
                     policy['auto_interval_seconds']=section['auto_interval_seconds']
+                if section['auto_tolerance_ms'] is not None:
+                    policy['auto_tolerance_ms']=section['auto_tolerance_ms']
                 groups[tag]=(members, 'section_'+section['id']+'_auto', policy)
         sites=None
         if any(policy.get('site_checks') for _,_,policy in groups.values()):
@@ -548,12 +551,13 @@ def automatic_select(current):
         results = []
         for tag, (members, native, policy) in ordered:
             previous = proxies.get(tag, {}).get('now')
+            rank=lambda members,policy,live: auto_choice(members,policy,live,None,previous)
             download=None
             if sites is not None and policy.get('site_checks'):
-                key,download=sites.choose(members,policy,proxies,previous,auto_choice)
+                key,download=sites.choose(members,policy,proxies,previous,rank)
             elif transfers is not None and policy.get('urltest_download_check')=='custom':
-                key,download=transfers.choose(members,policy,proxies,previous,auto_choice)
-            else:key = (auto_choice(members, policy, proxies) or 'policy-block') if custom else native
+                key,download=transfers.choose(members,policy,proxies,previous,rank)
+            else:key = (rank(members, policy, proxies) or 'policy-block') if custom else native
             try:
                 if previous != key:
                     clash_request('PUT', '/proxies/' + tag, {'name': key})
@@ -591,6 +595,22 @@ def wait_engine_ready(attempts=180):
                 pass
         time.sleep(.4)
     return False
+
+
+def claim_recovery_attempt():
+    """Share the restart limit across watchdog and interface events, using uptime."""
+    stamp = int(time.time())
+    clock = time.monotonic()
+    recovery = read_json(RUN / 'recovery.json', {})
+    attempts = [x for x in recovery.get('attempts', []) if type(x) is int and 0 <= stamp-x < 600]
+    monotonic_attempts = ([x for x in recovery.get('monotonic_attempts', [])
+                           if type(x) in (int, float) and 0 <= clock-x < 600]
+                          if 'monotonic_attempts' in recovery else [clock-(stamp-x) for x in attempts])
+    if len(monotonic_attempts) >= 3:
+        return False
+    atomic(RUN / 'recovery.json', {'attempts': (attempts + [stamp])[-3:],
+                                 'monotonic_attempts': monotonic_attempts + [clock]})
+    return True
 
 
 def healthcheck():
@@ -637,16 +657,8 @@ def healthcheck():
             return {'ok':True,'reason':'starting'}
         if wait_engine_ready(attempts=2):
             return {'ok': True, 'reason': 'healthy'}
-    stamp = int(time.time())
-    clock=time.monotonic()
-    recovery=read_json(RUN/'recovery.json',{})
-    attempts=[x for x in recovery.get('attempts',[]) if type(x) is int and 0 <= stamp-x < 600]
-    monotonic_attempts=[x for x in recovery.get('monotonic_attempts',[]) if type(x) in (int,float) and 0 <= clock-x < 600] if 'monotonic_attempts' in recovery else [clock-(stamp-x) for x in attempts]
-    if len(monotonic_attempts) >= 3:
+    if not claim_recovery_attempt():
         return {'ok': False, 'reason': 'restart-limit'}
-    attempts.append(stamp)
-    monotonic_attempts.append(clock)
-    atomic(RUN / 'recovery.json', {'attempts': attempts[-3:],'monotonic_attempts':monotonic_attempts})
     try:
         proc = run(['/etc/init.d/atlas', 'restart'], 90)
         ok = proc.returncode == 0 and wait_engine_ready()
@@ -735,11 +747,8 @@ def _interface_recover(current):
     last = read_json(RUN / 'interface-handled.json', {})
     if not event.get('id') or event.get('id') == last.get('id'):
         return {'ok':True,'reason':'already-handled'}
-    stamp=int(time.time())
-    attempts=[x for x in read_json(RUN/'recovery.json',{}).get('attempts',[]) if type(x) is int and stamp-x<600]
-    if len(attempts)>=3:
+    if not claim_recovery_attempt():
         return {'ok':False,'reason':'restart-limit'}
-    attempts.append(stamp);atomic(RUN/'recovery.json',{'attempts':attempts})
     try:
         result=run(['/etc/init.d/atlas','restart'],90)
         ok=result.returncode==0 and wait_engine_ready()
@@ -1276,7 +1285,12 @@ def store_rule_set(current, item, body, source=False):
     if source:item['source_rules']=json.loads(body)
     else:item.pop('source_rules',None)
     try:
-        check(make_config(current))
+        # A source awaiting its first download must not prevent another source
+        # from being validated. The complete routing config is checked on apply.
+        check({'outbounds': [{'type': 'direct', 'tag': 'direct'}],
+               'route': {'rule_set': [{'type': 'local', 'tag': 'verify-list',
+                                      'format': 'source' if source else 'binary', 'path': str(target)}],
+                         'rules': [{'rule_set': ['verify-list'], 'action': 'reject'}]}})
     except (AtlasError,OSError,subprocess.TimeoutExpired) as exc:
         if previous is None:target.unlink(missing_ok=True)
         else:atomic_bytes(target,previous)

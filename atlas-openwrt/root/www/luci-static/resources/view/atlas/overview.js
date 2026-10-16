@@ -930,7 +930,7 @@ return view.extend({
                     if (!updated.name) throw new Error('Введите название секции');
                     if(listRows.some(function(x){return !x.name.trim() || (!x.url.trim() && !x.source_catalogue_id);}))throw new Error('Заполните название и адрес каждого списка либо удалите пустую строку');
                     listRows.forEach(function(x){x.policy=updated.policy==='interface' ? 'proxy' : updated.policy;});
-                    if(updated.policy==='proxy' && !value.length && choiceMode.value==='manual' && !chosen.value)throw new Error('Выберите профиль секции');commit(updated);if(listContext && listContext.select && updated.policy==='proxy' && !value.length)listContext.select(updated.id,choiceMode.value==='auto' ? 'auto' : (updated.udp_over_tcp!==null || updated.udp_over_tcp_version!==null ? 'section_'+updated.id+'_' : '')+chosen.value); if(listContext)listContext.set(updated.id,listRows); ui.hideModal();
+                    if(updated.policy==='proxy' && !value.length && choiceMode.value==='manual' && !chosen.value)throw new Error('Выберите профиль секции');commit(updated);if(listContext && listContext.select && updated.policy==='proxy' && !value.length)listContext.select(updated.id,choiceMode.value==='auto' ? 'auto' : (updated.udp_over_tcp!==null || updated.udp_over_tcp_version!==null || (updated.urltest_url && updated.urltest_url!==self.data.settings.urltest_url) ? 'section_'+updated.id+'_' : '')+chosen.value); if(listContext)listContext.set(updated.id,listRows); ui.hideModal();
                 } catch (e) { msg.textContent = e.message || 'Проверьте JSON'; }
             }, 'primary')])]);
         }

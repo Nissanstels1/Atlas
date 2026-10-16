@@ -1332,6 +1332,21 @@ def validate_settings(data):
     choices = result['section_choices']
     if not isinstance(choices, dict) or any(not isinstance(k,str) or not isinstance(v,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', k) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', v) for k,v in choices.items()):
         raise AtlasError('Некорректный выбор серверов секций')
+    # A section-specific test URL needs separate measurement identities. Keep a
+    # saved manual choice when an administrator adds/removes that URL or a UDP
+    # override; only transform exact managed node IDs, never expert graph tags.
+    result['section_choices'] = dict(choices)
+    for section in sections:
+        if section['policy'] != 'proxy' or section['outbound_config']:
+            continue
+        control = 'section_' + section['id'] + '_control'
+        choice = result['section_choices'].get(control, '')
+        prefix = section_node_prefix(section, result)
+        own_prefix = 'section_' + section['id'] + '_'
+        if prefix and re.fullmatch(r'[a-f0-9]{32}', choice):
+            result['section_choices'][control] = prefix + choice
+        elif not prefix and choice.startswith(own_prefix) and re.fullmatch(r'[a-f0-9]{32}', choice[len(own_prefix):]):
+            result['section_choices'][control] = choice[len(own_prefix):]
 
     return result
 
@@ -1422,6 +1437,34 @@ def custom_auto_policy(settings):
     return settings['auto_strategy'] != 'fastest' or bool(settings['preferred_countries']) or bool(settings['min_ping_ms'] or settings['max_ping_ms']) or any(s.get('enabled',True) and s.get('site_checks') for s in settings['sections'])
 
 
+def rank_auto_candidates(candidates, settings, previous=None):
+    """Keep a qualifying current member within tolerance, preserving priorities.
+
+    Candidate tuples are (reserve rank, country rank, score, latest RTT, key).
+    The caller has already rejected missing/stale measurements and RTT limits;
+    retention must never manufacture evidence for an absent current member.
+    """
+    if not candidates:
+        return None
+    best = min(candidates)
+    current = next((item for item in candidates if item[4] == previous), None)
+    if (current is not None and current[:2] == best[:2]
+            and current[2] <= best[2] + settings['auto_tolerance_ms']):
+        return current[4]
+    return best[4]
+
+
+def section_node_prefix(section, settings):
+    """Isolate URLTest history when a section tests a different destination.
+
+    Native history is indexed by outbound tag rather than URL. Identical tests
+    may share their measurements, but distinct URLs must use distinct members.
+    """
+    private_transport = any(section.get(key) is not None for key in ('udp_over_tcp', 'udp_over_tcp_version'))
+    private_test = bool(section.get('urltest_url') and section['urltest_url'] != settings['urltest_url'])
+    return 'section_' + section['id'] + '_' if private_transport or private_test else ''
+
+
 def real_ip_resolution_active(config):
     return any(r.get('action') == 'resolve' and (r.get('server') == 'secure' or r.get('server','').startswith('vpn_dns_')) for r in config.get('route', {}).get('rules', []))
 
@@ -1508,6 +1551,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
     for iface, tag in interface_tags.items():
         outs.append({'type': 'direct', 'tag': tag, 'bind_interface': iface})
     section_targets = {}
+    source_outbounds = {outbound['tag']: outbound for outbound in outs}
     for section in settings['sections']:
         if section['outbound_config']:
             extra, target = namespace_graph(section['outbound_config'], 'section_' + section['id'],allow_external=True)
@@ -1527,12 +1571,13 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             if section['policy']=='proxy' and (section.get('pools') is not None or section.get('site_checks') or section['urltest_fallbacks'] or section['urltest_download_check']!='default' or any(section[k] is not None if k!='urltest_url' else bool(section[k]) for k in ('auto_interval_seconds','auto_tolerance_ms','urltest_url')) or any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version'))):
                 members=[tag for tag in tags if (not section.get('pools') or tag[:16] in section['pools']) and (not section['pool'] or tag.startswith(section['pool']))]
                 if not members:raise AtlasError('В выбранных подписках секции нет допущенных профилей')
-                if any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version')):
+                prefix = section_node_prefix(section, settings)
+                if prefix:
                     private=[]
                     for tag in members:
-                        outbound=copy.deepcopy(next(x for x in outs if x['tag']==tag))
-                        outbound['tag']='section_'+section['id']+'_'+tag
-                        if outbound['type'] in ('socks','shadowsocks'):
+                        outbound=copy.deepcopy(source_outbounds[tag])
+                        outbound['tag']=prefix+tag
+                        if outbound['type'] in ('socks','shadowsocks') and any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version')):
                             outbound['udp_over_tcp']={'enabled':settings['udp_over_tcp'] if section['udp_over_tcp'] is None else section['udp_over_tcp'],'version':settings['udp_over_tcp_version'] if section['udp_over_tcp_version'] is None else section['udp_over_tcp_version']}
                         private.append(outbound)
                     outs.extend(private)
@@ -1557,7 +1602,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                     tag='section_'+section['id']+'_auto'
                     group=next((x for x in outs if x['tag']==tag and not section['outbound_config']),None)
                     if group:
-                        prefix='section_'+section['id']+'_' if section['udp_over_tcp'] is not None or section['udp_over_tcp_version'] is not None else ''
+                        prefix=section_node_prefix(section,settings)
                         engine_features.extend_group(group,section,features,prefix,custom)
             except ValueError as exc:raise AtlasError(str(exc)) from exc
     if custom:
