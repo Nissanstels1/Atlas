@@ -75,6 +75,9 @@ function atlasRouteName(tag,data) {
     if(section){var member=(data.nodes || []).find(function(n){return tag==='section_'+section.id+'_'+n.key;});return member ? member.name+' · '+section.name : 'Секция: '+section.name;}
     return tag;
 }
+function atlasRouteChain(tags,data) {
+    return (tags || []).map(function(tag){return atlasRouteName(tag,data);}).filter(function(name,index,names){return !index || name!==names[index-1];}).join(' → ') || 'неизвестно';
+}
 function atlasMergeSectionLists(lists,overrides) {
     var original=lists || [],owners=Object.create(null),result=[];
     Object.keys(overrides || {}).forEach(function(id){owners[id]={rows:overrides[id],ids:Object.create(null),updated:Object.create(null),added:[],last:-1};});
@@ -350,7 +353,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=detailed-ui-final-20261014' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=menu-wrap-20261016' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -400,7 +403,7 @@ return view.extend({
             node('div', 'at-brand', [node('span', 'at-logo', label('a')), node('div', '', [node('strong', '', label('atlas')), node('small', '', label('OPENWRT · ROUTING'))])]),
             node('div', 'at-nav-label', label('РАБОЧЕЕ ПРОСТРАНСТВО')),
             node('nav', 'at-nav', navigation.map(function(n) {
-                return node('button', self.tab === n[0] ? 'active' : '', [node('span', 'at-nav-icon', label(n[1])), label(n[2]), n[0] === 'subscriptions' ? node('small', '', label(d.subscriptions.length)) : label('')], {
+                return node('button', self.tab === n[0] ? 'active' : '', [node('span', 'at-nav-icon', label(n[1])), node('span', 'at-nav-text', label(n[2])), n[0] === 'subscriptions' ? node('small', '', label(d.subscriptions.length)) : label('')], {
                     type: 'button', 'aria-current': self.tab === n[0] ? 'page' : null,
                     click: function() { self.navigate(n[0]); }
                 });
@@ -1232,7 +1235,7 @@ return view.extend({
                             node('td', '', [node('strong', '', label(c.host || c.destination || 'неизвестный адрес')), node('small', '', label(c.rule ? c.rule + (c.rule_payload ? ' · ' + c.rule_payload : '') : 'Правило не указано'))]),
                             node('td', '', label(c.source || '—')),
                             node('td', '', label((c.network || '—').toUpperCase())),
-                            node('td', '', label((c.chains || []).map(function(tag){return atlasRouteName(tag,self.data);}).join(' → ') || 'неизвестно')),
+                            node('td', '', label(atlasRouteChain(c.chains,self.data))),
                             node('td', '', label('↑ ' + bytes(c.upload) + ' · ↓ ' + bytes(c.download)))
                         ]);
                     }))

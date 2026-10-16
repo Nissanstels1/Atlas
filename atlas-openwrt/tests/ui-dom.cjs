@@ -29,6 +29,7 @@ const all=n=>[n,...n.children.flatMap(all)];
  assert(all(app.root).find(n=>n.tag==='button'&&n.textContent==='Запустить Atlas').disabled===true,'Empty setup must block routing start');
  assert(!all(app.root).find(n=>n.tag==='button'&&n.textContent==='Добавить подписку').disabled,'Add subscription must remain enabled with zero servers');
  assert(app.root.textContent.includes('Открыть секции'),'Overview must link to the canonical section editor');
+ assert(all(app.root).filter(n=>(n.attributes.class||'').split(' ').includes('at-nav-text')).length===7,'All menu captions need a separate wrapping label');
  app.navigate('subscriptions');
  
  assert(!all(app.root).find(n=>n.tag==='button'&&n.textContent==='+ Подписка').disabled,'Subscription button blocked by false HTML attribute');

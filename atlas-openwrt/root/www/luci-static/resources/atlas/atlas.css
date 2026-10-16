@@ -145,3 +145,12 @@
  .atlas .at-connection-rows .at-table td small{max-width:none;overflow-wrap:anywhere}
  .atlas .at-connection-rows{overflow-x:visible}
 }
+
+/* LuCI themes may break every button word; menu labels wrap only at spaces. */
+.atlas .at-nav button,.atlas .at-nav-text{word-break:normal;overflow-wrap:normal;white-space:normal}
+.atlas .at-nav-text{min-width:0;flex:1;line-height:1.4}
+.atlas .at-nav-icon,.atlas .at-nav small{flex-shrink:0}
+@media(min-width:651px) and (max-width:1150px){.atlas .at-nav button{gap:8px;padding:10px 8px;font-size:13px}}
+
+/* Size connection rows against their own card, including LuCI sidebars. */
+.atlas .at-connection-rows{container-type:inline-size}

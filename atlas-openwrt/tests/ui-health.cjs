@@ -1,6 +1,6 @@
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const source=fs.readFileSync(path.join(__dirname,'../root/www/luci-static/resources/view/atlas/overview.js'),'utf8');
-const h=new Function(source.slice(source.indexOf('function atlasElement'),source.indexOf('return view.extend({'))+'return {atlasHelp,atlasProfileHealth,atlasCommunityLists,atlasSelectableLists,atlasSectionChoice,atlasSectionConnection};')();
+const h=new Function(source.slice(source.indexOf('function atlasElement'),source.indexOf('return view.extend({'))+'return {atlasHelp,atlasProfileHealth,atlasCommunityLists,atlasSelectableLists,atlasSectionChoice,atlasSectionConnection,atlasRouteChain};')();
 const now=new Date().toISOString(),old=new Date(Date.now()-600000).toISOString();
 const data={running:true,settings:{auto_interval_seconds:60},nodes:[{key:'a'},{key:'b'},{key:'c'},{key:'d'},{key:'e',eligible:false}],runtime:{available:true,measurements:{a:{ok:true,latency_ms:150,checked_at:now},b:{ok:true,latency_ms:160,checked_at:old},c:{ok:false,latency_ms:0,checked_at:now},e:{ok:true,latency_ms:100,checked_at:now}}},checks:{d:{ok:true,latency_ms:10,checked:Date.now()/1000}}};
 const health=h.atlasProfileHealth(data);
@@ -36,3 +36,11 @@ assert.equal(h.atlasSectionConnection({...section,pools:null,pool:sub},choices),
 assert.equal(h.atlasSectionConnection({...section,outbound_config_set:true},choices),'Свой JSON выход');
 assert.equal(h.atlasSectionConnection({...section,policy:'direct'},choices),'');
 console.log('PASS: section cards and editor agree on independent/shared/manual/automatic/custom connections and staged selections.');
+
+const routeData={nodes:[{key:'node',name:'Server'}],subscriptions:[],settings:{sections:[{id:'a'.repeat(16),name:'Video'}]}};
+const prefix='section_'+'a'.repeat(16)+'_';
+assert.equal(h.atlasRouteChain(['node',prefix+'auto',prefix+'control'],routeData),'Server → Секция: Video');
+assert.equal(h.atlasRouteChain(['direct'],routeData),'Напрямую');
+assert.equal(h.atlasRouteChain([],routeData),'неизвестно');
+assert.equal(h.atlasRouteChain(['unrecognized','direct','unrecognized'],routeData),'unrecognized → Напрямую → unrecognized');
+console.log('PASS: monitor collapses adjacent selector labels, preserves distinct route steps and unknown tags.');
