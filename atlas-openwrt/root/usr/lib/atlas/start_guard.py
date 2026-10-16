@@ -28,6 +28,9 @@ def supervise(child, ready, attach, restore, report, stopped=lambda: False,
                 if stopped():
                     stage='stopped'
                     return 0
+                if child.poll() is not None:
+                    stage = 'engine-exited'
+                    return 1
                 failures = 0
                 if not attached:
                     stage = 'connecting-dns'
@@ -37,6 +40,9 @@ def supervise(child, ready, attach, restore, report, stopped=lambda: False,
                     if stopped():
                         stage='stopped'
                         return 0
+                    if child.poll() is not None:
+                        stage = 'engine-exited'
+                        return 1
                     stage = 'ready'
                     report(stage, local_ready=True, internet_verified=False)
             elif not attached:

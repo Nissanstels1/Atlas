@@ -52,6 +52,22 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(self.run_guard(ready),1)
         self.attach.assert_not_called();self.assertEqual(self.report.call_args.args[0],'engine-exited')
 
+    def test_engine_exits_during_readiness_probe_without_dns_capture(self):
+        def ready():
+            self.child.code = 2
+            return True
+        self.assertEqual(self.run_guard(ready), 1)
+        self.attach.assert_not_called()
+        self.assertEqual(self.report.call_args.args[0], 'engine-exited')
+        self.assertFalse(any(c.args[0] == 'ready' for c in self.report.call_args_list))
+
+    def test_engine_exits_during_dns_attach_without_ready_report(self):
+        attach = Mock(side_effect=lambda: setattr(self.child, 'code', 2))
+        self.assertEqual(self.run_guard(lambda: True, attach=attach), 1)
+        self.restore.assert_called_once()
+        self.assertEqual(self.report.call_args.args[0], 'engine-exited')
+        self.assertFalse(any(c.args[0] == 'ready' for c in self.report.call_args_list))
+
     def test_hung_running_engine_is_restored_and_terminated(self):
         self.assertEqual(self.run_guard(lambda:self.clock.now==0),1)
         self.assertEqual(self.report.call_args.args[0],'engine-unresponsive')
