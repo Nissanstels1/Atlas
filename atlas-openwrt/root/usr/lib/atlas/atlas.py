@@ -374,28 +374,84 @@ def runtime_monitor():
                 'connections': [], 'rules': [], 'resources': resources}
 
 
-def process_memory():
+def process_memory(proc=Path('/proc')):
     """Read sing-box RSS from procfs; the compatible Clash /memory endpoint can hang."""
     try:
         result = run(['/bin/ubus', 'call', 'service', 'list', json.dumps({'name': 'atlas'})], 3)
         services = json.loads(result.stdout) if result.returncode == 0 else {}
         instances = services.get('atlas', {}).get('instances', {})
+        total, found, seen = 0, False, set()
+        expected = os.path.realpath(BINARY)
+        def identity(path):
+            fields = (path / 'stat').read_text().rsplit(')', 1)[1].split()
+            return fields[19] if fields[0] not in ('Z', 'X') else ''
         for instance in instances.values():
             pid = instance.get('pid') if isinstance(instance, dict) else None
             if type(pid) is not int or pid <= 0:
                 continue
-            status = Path('/proc/%d/status' % pid).read_text()
-            match = re.search(r'^VmRSS:\s+(\d+)\s+kB$', status, re.M)
-            if match:
-                return {'inuse': int(match.group(1)) * 1024}
+            candidates = [pid]
+            try:
+                children = (proc / str(pid) / 'task' / str(pid) / 'children').read_text()[:4096]
+                candidates += [int(x) for x in children.split()[:8] if x.isdecimal()]
+            except OSError:
+                # Many OpenWrt kernels omit /proc/.../children. pidof narrows
+                # candidates; executable, PPid and start ticks still prove ownership.
+                try:
+                    found_pids = run(['/bin/pidof', Path(BINARY).name], 3)
+                    if found_pids.returncode == 0:
+                        candidates += [int(x) for x in found_pids.stdout.split()[:8] if x.isdigit()]
+                except (AtlasError, OSError, ValueError, subprocess.TimeoutExpired):
+                    pass
+            for child in candidates:
+                if child in seen: continue
+                path = proc / str(child)
+                try:
+                    before = identity(path)
+                    if not before: continue
+                    executable = os.readlink(path / 'exe').removesuffix(' (deleted)')
+                    if executable != expected: continue
+                    status = (path / 'status').read_text()
+                    parent = re.search(r'^PPid:\s+(\d+)\s*$', status, re.M)
+                    if child != pid and (not parent or int(parent[1]) != pid): continue
+                    match = re.search(r'^VmRSS:\s+(\d+)\s+kB$', status, re.M)
+                    if match and before == identity(path):
+                        seen.add(child)
+                        total += int(match[1]) * 1024
+                        found = True
+                except (OSError, ValueError, IndexError):
+                    continue
+        if found: return {'inuse': total}
     except (AtlasError, OSError, ValueError, TypeError, subprocess.TimeoutExpired):
         pass
     return {}
 
 
+_api_config_cache = None
+
+
+def active_api_config():
+    """Reuse one parse per content digest; coarse filesystem timestamps are unsafe."""
+    global _api_config_cache
+    try:
+        body = CONFIG.read_bytes()
+        identity = (str(CONFIG), hashlib.sha256(body).hexdigest())
+        if _api_config_cache is not None and _api_config_cache[0] == identity:
+            return _api_config_cache[1]
+        _api_config_cache = None
+        active = json.loads(body)
+        _api_config_cache = (identity, active)
+        return active
+    except FileNotFoundError:
+        _api_config_cache = None
+        return {}
+    except Exception:
+        _api_config_cache = None
+        raise
+
+
 def clash_request(method='GET', path='/proxies', body=None, timeout=2):
     """Talk only to Atlas' loopback Clash API; never expose the token over RPC."""
-    active = json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
+    active = active_api_config()
     path, body = wire_request(active, path, body)
     api = active.get('experimental', {}).get('clash_api', {})
     controller = api.get('external_controller', '')

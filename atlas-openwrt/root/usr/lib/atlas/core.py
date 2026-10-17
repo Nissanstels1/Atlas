@@ -1484,6 +1484,31 @@ def section_match(section, match, dns=False):
     return {'type':'logical','mode':'and','rules':[match]+guards} if guards else match
 
 
+def fakeip_record_rules(rules):
+    """Keep FakeIP on address queries; do not expose real service IP hints."""
+    result = []
+    for rule in rules:
+        if rule.get('action') != 'route' or rule.get('server') != 'fakeip':
+            result.append(rule)
+            continue
+        match = {k: copy.deepcopy(v) for k, v in rule.items()
+                 if k not in ('action', 'server', 'rewrite_ttl')}
+        def for_types(types):
+            if match.get('type') == 'logical':
+                return {'type': 'logical', 'mode': 'and',
+                        'rules': [copy.deepcopy(match), {'query_type': types}]}
+            return dict(copy.deepcopy(match), query_type=types)
+        result.append(dict(for_types(['A', 'AAAA']), action='route', server='fakeip',
+                           **({'rewrite_ttl': rule['rewrite_ttl']} if 'rewrite_ttl' in rule else {})))
+        # FakeIP cannot answer HTTPS/SVCB records. An empty successful reply
+        # avoids retries and real ipv4hint/ipv6hint addresses bypassing FakeIP.
+        result.append(dict(for_types(['SVCB', 'HTTPS']), action='predefined', rcode='NOERROR'))
+        # TXT/MX/NS and other records retain the resolver of the same policy,
+        # rather than falling through to a later section's DNS decision.
+        result.append(dict(match, action='route', server='secure'))
+    return result
+
+
 def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=None):
     settings = validate_settings(state['settings'])
     settings['sections'] = [x for x in settings['sections'] if x['enabled']]
@@ -1915,6 +1940,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         dns_rules[0:0] = [
             {'domain': ['fakeip.podkop.fyi', 'ip.podkop.fyi'], 'query_type': ['HTTPS'], 'action': 'reject'},
             {'domain': ['fakeip.podkop.fyi', 'ip.podkop.fyi'], 'action': 'route', 'server': 'fakeip', 'rewrite_ttl': settings['fakeip_ttl_seconds']}]
+    dns_rules = fakeip_record_rules(dns_rules)
     inbounds = [inbound] + section_inbounds
     if tun:
         interfaces = sorted({i for s in settings['sections'] for i in s['source_interfaces']})

@@ -353,7 +353,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=menu-wrap-20261016' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=profile-filter-20261017' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -578,10 +578,19 @@ return view.extend({
         var search = node('input', 'at-input at-search', [], { placeholder: 'Поиск сервера или подписки…', value: self.search, 'aria-label': 'Поиск сервера', focus: function() { self.searchFocused = true; }, blur: function() { self.searchFocused = false; } });
         var container = node('div', 'at-table-wrap at-profile-rows');
         var pages = node('div', 'at-actions at-profile-pages', [], { 'aria-label': 'Страницы профилей' });
+        var filterSummary = node('div', 'at-profile-filter-summary', [], { role: 'status', 'aria-live': 'polite' });
+        var showAll = node('input', '', [], { type: 'checkbox', checked: !!self.showExcludedProfiles });
+        var filterBar = node('div', 'at-profile-filter-bar', [filterSummary, atlasElement('label', { 'class': 'at-checkbox' }, [showAll, label('Показать все профили')])]);
         function table() {
             d = self.data; checks = d.checks || {}; measured = (d.runtime || {}).measurements || {};
             var query = self.search.toLowerCase();
-            var matches = d.nodes.filter(function(n) { return (n.name + ' ' + n.subscription).toLowerCase().indexOf(query) >= 0; });
+            var allowed = d.nodes.filter(function(n) { return n.eligible !== false; });
+            var excluded = d.nodes.length - allowed.length;
+            var visible = self.showExcludedProfiles ? d.nodes : allowed;
+            showAll.checked = !!self.showExcludedProfiles;
+            filterSummary.replaceChildren(node('strong', '', label(self.showExcludedProfiles ? 'Показаны все профили' : excluded ? 'Список отфильтрован' : 'Все профили проходят фильтры')),
+                node('small', '', label('Прошли фильтры: ' + allowed.length + ' из ' + d.nodes.length + '. ' + (self.showExcludedProfiles ? 'Исключены из выбора: ' : 'Скрыто из списка: ') + excluded + '.')));
+            var matches = visible.filter(function(n) { return (n.name + ' ' + n.subscription).toLowerCase().indexOf(query) >= 0; });
             var size = 50, last = Math.max(0, Math.ceil(matches.length / size) - 1);
             self.nodePage = Math.max(0, Math.min(self.nodePage || 0, last));
             var offset = self.nodePage * size, list = matches.slice(offset, offset + size);
@@ -597,9 +606,10 @@ return view.extend({
                     var measurement=node('div','at-measurement',[node('strong','',label('Автоматический замер')),pill(live ? !fresh ? 'Замер устарел' : live.ok ? live.latency_ms+' мс' : 'Не прошёл' : 'Нет замера',live && fresh ? live.ok ? 'success' : 'danger' : 'neutral'),node('small','',label(live ? liveDate(live.checked_at) : n.eligible === false ? 'Профиль исключён фильтрами' : 'Нет успешного фонового замера: профиль недоступен или отсутствует в активном пуле')),node('small','',label('Ручной HTTPS-тест: '+(!c ? 'не запускался' : c.ok ? c.latency_ms+' мс · '+date(c.checked) : 'не прошёл · '+date(c.checked))),{'title':c && c.error || ''})]);
                     return node('tr', d.runtime && d.runtime.selected === n.key ? 'selected' : '', [node('td', '', [node('strong', '', label(n.name)), node('small', '', label(n.server + ':' + n.port)), node('small','at-profile-meta',label(n.type.toUpperCase()+' · '+(n.country || '—')+' · '+n.subscription)), node('div','at-compact-only',self.button('IP выхода',function(){return self.action('geo_check',n.key);},'small',self.busy())), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label(''), d.runtime && d.runtime.selected === n.key ? pill('Используется движком', 'success') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', self.button('В секцию',function(){self.navigate('routing');},'small',self.busy()))]);
                 }))]));
-            if (!list.length) container.appendChild(self.empty('Серверов нет', d.nodes.length ? 'Попробуйте другой запрос.' : 'Добавьте и обновите подписку.'));
+            if (!list.length) container.appendChild(!d.nodes.length ? self.empty('Серверов нет', 'Добавьте и обновите подписку.') : !self.showExcludedProfiles && !allowed.length ? self.empty('Все профили исключены фильтрами', 'Измените общие фильтры или включите «Показать все профили».') : self.empty('Ничего не найдено', 'Измените запрос. Поиск идёт среди показанных профилей.'));
         }
         self.updateNodeTable = table;
+        showAll.addEventListener('change', function() { self.showExcludedProfiles = showAll.checked; self.nodePage = 0; table(); });
         search.addEventListener('input', function() { self.search = search.value; self.nodePage = 0; table(); }); table();
         var eligible = d.nodes.filter(function(n) { return n.eligible !== false; }).length;
         var runtime = d.runtime || {};
@@ -609,7 +619,7 @@ return view.extend({
             node('section', 'at-card at-padded', [node('h3', '', label('Фактически выбран движком')), node('p', 'at-runtime-name', label(runtime.available && runtime.selected ? runtime.name : runtime.message || 'Данные движка недоступны')), runtime.selected ? node('p', 'at-footnote', label((runtime.automatic || d.settings.selected === 'auto' ? 'Автоматический режим' : 'Вручную') + ' · в активной группе: ' + runtime.candidate_count + (runtime.last_delay_ms ? ' · последний замер: ' + runtime.last_delay_ms + ' мс (' + runtime.last_check + ')' : ''))) : label(''), node('p', 'at-footnote', label('Выбор узла сам по себе не подтверждает доступность соединения. После изменения настроек активная группа обновляется при применении.'))]),
             node('section', 'at-card at-padded', [node('h3', '', label('Пулы подписок')), node('div', '', (runtime.groups || []).map(function(g) { var sub = d.subscriptions.find(function(x) { return 'pool_' + x.id === g.group; }); return node('p', 'at-footnote', label((sub ? sub.name : g.group) + ': ' + g.name)); }))]),
             eligible === 1 ? node('p', 'at-inline-error', label('Фильтры оставили один узел. При его отказе переключаться не на что; другая страна автоматически не добавится.')) : label(''),
-            search, pages, container, node('p', 'at-footnote', label('Поиск проверяет все профили. Страницы меняют только отображение: автовыбор продолжает проверять весь настроенный пул. Фильтры ограничивают доступные серверы. Страна берётся из проверенного IP выхода, а до проверки — из метки провайдера.'))]);
+            filterBar, search, pages, container, node('p', 'at-footnote', label('По умолчанию показаны только профили, прошедшие общие фильтры. Поиск действует среди показанных профилей на всех страницах. «Показать все профили» открывает и исключённые для просмотра; автовыбор по-прежнему использует только разрешённые.'))]);
     },
     autoDialog: function() {
         var self = this, s = self.data.settings;

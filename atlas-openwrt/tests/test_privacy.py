@@ -76,7 +76,7 @@ class PrivacyFeatures(unittest.TestCase):
     def test_fakeip_covers_all_names_only_in_global_mode(self):
         s = state(); s['settings'].update(mode='global', fakeip=True)
         c = core.make_config(s)
-        self.assertEqual(c['dns']['rules'][0], {'action': 'route', 'server': 'fakeip', 'rewrite_ttl': 60})
+        self.assertEqual(c['dns']['rules'][0], {'query_type': ['A', 'AAAA'], 'action': 'route', 'server': 'fakeip', 'rewrite_ttl': 60})
         s['settings']['fakeip_ttl_seconds'] = 20
         self.assertEqual(core.make_config(s)['dns']['rules'][0]['rewrite_ttl'], 20)
 
