@@ -44,7 +44,7 @@ const root=path.resolve(__dirname,'..');
   const results=[];
   for(const width of [320,360,390,420,421,650,651,768,1024,1150,1280,1440]) {
    await page.setViewportSize({width,height:1000});
-   for(const tab of ['overview','subscriptions','nodes','routing','privacy','monitor','settings']) {
+   for(const tab of ['overview','subscriptions','nodes','routing','lists','privacy','monitor','settings']) {
     await page.evaluate(t=>app.navigate(t),tab);
     const check=await page.evaluate(()=>{
      const r=document.querySelector('.atlas'),box=r.getBoundingClientRect();
@@ -54,7 +54,7 @@ const root=path.resolve(__dirname,'..');
       const b=e.getBoundingClientRect(),rects=Array.from(range.getClientRects());
       return {name:text.textContent,broken:getComputedStyle(text).wordBreak!=='normal',outside:rects.some(x=>x.left<b.left-1||x.right>b.right+1)};
      });
-     return {overflow:r.scrollWidth-r.clientWidth,outside,nav,connectionOverflow:Array.from(r.querySelectorAll('.at-connection-rows')).some(e=>e.scrollWidth-e.clientWidth>1),bad:r.innerText.match(/.{0,60}(?:undefined|\[object Object\]).{0,60}/g)};
+     return {overflow:r.scrollWidth-r.clientWidth,outside,nav,connectionOverflow:Array.from(r.querySelectorAll('.at-flow-list')).some(e=>e.scrollWidth-e.clientWidth>1),bad:r.innerText.match(/.{0,60}(?:undefined|\[object Object\]).{0,60}/g)};
     });
     if(check.overflow>1||check.connectionOverflow||check.outside.length||check.bad||check.nav.some(x=>x.broken||x.outside))throw Error(JSON.stringify({width,tab,...check}));
    }
@@ -62,10 +62,30 @@ const root=path.resolve(__dirname,'..');
    const modal=await page.locator('#modal').evaluate(m=>({overflow:m.scrollWidth-m.clientWidth,bad:/undefined|\[object Object\]/.test(m.innerText)}));
    if(modal.overflow>1||modal.bad)throw Error(JSON.stringify({width,modal}));
    await page.getByRole('button',{name:'Отмена',exact:true}).click();
-   results.push({width,views:7,sectionDialog:'PASS'});
+   results.push({width,views:8,sectionDialog:'PASS'});
+  }
+  // A long-lived page must mark real leaf selections, including independent
+  // sections, without marking an unused urltest winner in manual mode.
+  await page.evaluate(()=>{
+   const base=app.data.nodes[0];app.data.nodes=[base,{...base,key:'c'.repeat(32),name:'Pool leaf'},{...base,key:'d'.repeat(32),name:'Section leaf'}];
+   app.data.runtime={available:true,selected:base.key,groups:[{selected:'c'.repeat(32)}]};
+   app.tab='nodes';app.draw();
+   app.liveSections=[{id:'a'.repeat(16),groups:[{tag:'control',type:'selector',selected:'auto'},{tag:'auto',type:'urltest',selected:'section_'+'a'.repeat(16)+'_'+'d'.repeat(32)}]}];app.updateNodeTable();
+  });
+  if(await page.locator('.at-profile-rows tr.selected').count()!==3)throw Error('Missing active pool/section leaf');
+  const selectedStyle=await page.locator('.at-profile-rows tr.selected').first().evaluate(e=>({background:getComputedStyle(e).backgroundColor,outline:getComputedStyle(e).outlineWidth,cell:getComputedStyle(e.cells[0]).backgroundColor}));
+  if(selectedStyle.background==='rgba(0, 0, 0, 0)'||selectedStyle.outline==='0px'||selectedStyle.cell!=='rgba(0, 0, 0, 0)')throw Error('Active row is not highlighted as a whole');
+  await page.evaluate(()=>{app.liveSections[0].groups[0].selected=app.data.nodes[0].key;app.updateNodeTable();});
+  if(await page.locator('.at-profile-rows tr.selected').count()!==2)throw Error('Unused auto leaf highlighted in manual mode');
+  for(const width of [390,1440]){
+   await page.setViewportSize({width,height:1000});
+   await page.evaluate(()=>{app.tab='monitor';app.monitor={available:true,connections:Array.from({length:10},(_,i)=>({host:'media'+i+'.example.org',source:'192.168.1.25:12345',network:'tcp',chains:['direct'],upload:12345,download:67890}))};app.draw();});
+   const heights=await page.locator('.at-flow').evaluateAll(rows=>rows.map(e=>e.getBoundingClientRect().height));
+   if(heights.length!==10||Math.max(...heights)>(width<650?95:65))throw Error(JSON.stringify({width,heights}));
   }
   if(errors.length)throw Error(errors.join('\n'));
-  console.log('PASS: 84 page layouts and 12 section dialogs, inherited LuCI button wrapping, all navigation captions and controls inside their containers.');
+  console.log('PASS: 96 page layouts and 12 section dialogs, inherited LuCI button wrapping, all navigation captions and controls inside their containers.');
   console.log(JSON.stringify(results));
+  console.log('PASS: compact connection rows, full active-row colour, pool and independent-section leaf selection, unused auto winner excluded.');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

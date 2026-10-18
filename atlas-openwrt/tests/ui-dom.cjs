@@ -29,14 +29,14 @@ const all=n=>[n,...n.children.flatMap(all)];
  assert(all(app.root).find(n=>n.tag==='button'&&n.textContent==='Запустить Atlas').disabled===true,'Empty setup must block routing start');
  assert(!all(app.root).find(n=>n.tag==='button'&&n.textContent==='Добавить подписку').disabled,'Add subscription must remain enabled with zero servers');
  assert(app.root.textContent.includes('Открыть секции'),'Overview must link to the canonical section editor');
- assert(all(app.root).filter(n=>(n.attributes.class||'').split(' ').includes('at-nav-text')).length===7,'All menu captions need a separate wrapping label');
+ assert(all(app.root).filter(n=>(n.attributes.class||'').split(' ').includes('at-nav-text')).length===8,'All menu captions need a separate wrapping label');
  app.navigate('subscriptions');
  
  assert(!all(app.root).find(n=>n.tag==='button'&&n.textContent==='+ Подписка').disabled,'Subscription button blocked by false HTML attribute');
  app.readonly=true;app.draw();
  assert(all(app.root).find(n=>n.tag==='button'&&n.textContent==='+ Подписка').disabled===true,'Read-only permissions must still block changes');
  app.readonly=false;app.draw();
- for(const t of ['overview','subscriptions','nodes','routing','privacy','monitor','settings']){app.navigate(t);assert(app.root.children.length===2,t+' failed');}
+ for(const t of ['overview','subscriptions','nodes','routing','lists','privacy','monitor','settings']){app.navigate(t);assert(app.root.children.length===2,t+' failed');}
  data.subscriptions=[{id:'a'.repeat(16),name:'<img src=x onerror=alert(1)>',host:'example.com',count:1,enabled:true,metadata:{}}];
  data.nodes=[{key:'a'.repeat(32),name:'Node',subscription:'Test',type:'vless',server:'example.com',port:443}];
  data.runtime={measurements:{['a'.repeat(32)]:{ok:true,latency_ms:50,checked_at:'2000-01-01T00:00:00Z'}}};
@@ -66,7 +66,7 @@ const all=n=>[n,...n.children.flatMap(all)];
  app.sectionDialog(sampleSection,()=>{}, {get:()=>[],set(){},choice:()=>data.nodes[0].key});
  assert(all(modal).find(n=>(n.attributes.class||'').includes('at-section-choice-mode')).value==='manual','Reopening the editor lost its staged choice');
  app.settingsPage();assert(all(app.settingsPage()).some(n=>n.tag==='details'&&(n.attributes.class||'').includes('at-settings-advanced')&&!n.attributes.open),'Technical settings must be collapsed initially');
- for(const t of ['overview','subscriptions','nodes','routing','privacy','monitor','settings'])app.navigate(t);
+ for(const t of ['overview','subscriptions','nodes','routing','lists','privacy','monitor','settings'])app.navigate(t);
  app.navigate('subscriptions');assert(!all(app.root).some(n=>n.tag==='img'),'HTML injection');
  app.subscriptionDialog();assert(modal.textContent.includes('Ссылка подписки'),'Add modal');assert(modal.textContent.includes('HTTP-заголовки провайдера'),'Provider header input missing');assert(all(modal).some(n=>n.tag==='details'&&n.textContent.includes('заголовки провайдера')&&!n.attributes.open),'Optional headers should start collapsed');
  const url=all(modal).find(n=>n.tag==='textarea'&&(n.attributes.class||'').includes('at-subscription-url'));assert(url,'Visible subscription URL textarea missing');assert(!all(modal).some(n=>n.attributes.type==='password'),'Subscription link must not invoke password autofill');
@@ -232,7 +232,7 @@ const all=n=>[n,...n.children.flatMap(all)];
  assert(data.settings.mode==='global'&&data.settings.kill_switch,'Security recommendations were not saved');
  assert(data.settings.sections.length===retainedSettings.sections.length,'Security recommendations removed groups');
  // Every disclosure, including nested field help, survives redraws and tab changes.
- for(const tab of ['overview','subscriptions','nodes','routing','privacy','monitor','settings']){
+ for(const tab of ['overview','subscriptions','nodes','routing','lists','privacy','monitor','settings']){
    app.navigate(tab);const details=app.root.querySelectorAll('details');details.forEach(x=>x.open=true);app.draw();
    assert(app.root.querySelectorAll('details').every(x=>x.open),'Open disclosure collapsed on '+tab);
    app.root.querySelectorAll('details').forEach(x=>x.open=false);app.draw();
@@ -242,7 +242,7 @@ const all=n=>[n,...n.children.flatMap(all)];
  assert(audit,'Detailed audit disclosure missing');audit.open=true;await pollCallback();
  assert(app.root.querySelectorAll('details').find(x=>x.textContent.startsWith('Подробный аудит, FakeIP и сетевые инструменты')).open,'Status polling closed detailed audit');
  app.navigate('overview');app.navigate('privacy');assert(app.root.querySelectorAll('details').find(x=>x.textContent.startsWith('Подробный аудит, FakeIP и сетевые инструменты')).open,'Tab navigation lost detailed audit');
- assert(Object.keys(app.disclosureState).length<=7,'Disclosure state accumulates beyond available tabs');
+ assert(Object.keys(app.disclosureState).length<=8,'Disclosure state accumulates beyond available tabs');
  app.navigate('overview');assert(app.root.textContent.includes('БЫСТРАЯ НАСТРОЙКА'),'Prominent wizard start block missing');
  assert(all(app.root).filter(x=>x.tag==='button'&&x.textContent==='Настроить по вопросам').every(x=>(x.attributes.class||'').includes('at-wizard-launch')),'Wizard launch not emphasized');
  if(app.monitorRequest)await app.monitorRequest;
@@ -277,6 +277,22 @@ const all=n=>[n,...n.children.flatMap(all)];
  const wizardName=all(modal).find(n=>(n.attributes.class||'').includes('at-wizard-name'));wizardName.value='Library wizard';wizardName.listeners.input();await libraryClick(next());
  assert(modal.textContent.includes('Мои сохранённые списки')&&modal.textContent.includes(template.name),'Library source missing from wizard');ui.hideModal();
  app.navigate('routing');assert(all(app.root).find(n=>n.tag==='select'&&(n.attributes.class||'').includes('at-community-catalog')).textContent.includes(template.name),'Library source missing from global rules');
+ // Saved redacted URLs are storage sentinels, never editable fake links.
+ app.navigate('lists');assert(app.root.textContent.includes(template.name),'Separate My lists page missing saved source');
+ const savedSource={id:'7'.repeat(16),name:'Saved URL',url:'https://provider.example/[saved]',content:'',format:'domains'};
+ app.data.settings.list_catalogue.push(savedSource);
+ await app.listCatalogueDialog(null,savedSource.id);
+ let savedInput=all(modal).find(n=>(n.attributes.class||'').includes('at-library-url'));
+ assert(savedInput.value===''&&savedInput.attributes.placeholder.includes('Ссылка сохранена'),'Redacted URL presented as editable address');
+ await libraryClick(all(modal).find(n=>n.tag==='button'&&n.textContent==='Сохранить библиотеку'));
+ assert(calls.filter(c=>c.method==='save_settings').at(-1).args[0].list_catalogue.find(x=>x.id===savedSource.id).url===savedSource.url,'Saving blank replacement destroyed saved URL');
+ let savedRows=[];
+ app.sectionDialog(sampleSection,()=>{}, {get:()=>[{id:'6'.repeat(16),name:'Saved section list',url:savedSource.url,format:'domains',enabled:true,section:sampleSection.id}],set:(id,rows)=>{savedRows=rows;}});
+ const sourceAddress=all(modal).find(n=>n.tag==='textarea'&&n.attributes.placeholder?.includes('Ссылка сохранена'));
+ assert(sourceAddress&&sourceAddress.value==='','Section shows a redacted fake URL');
+ await libraryClick(all(modal).find(n=>n.tag==='button'&&n.textContent==='Добавить в форму'));
+ assert(savedRows[0]?.url===savedSource.url,'Section lost saved link');
+ ui.hideModal();
   // A large pool is fully searchable/testable without constructing 1200 rows
   // on every poll. Pagination must also cope with source/filter changes.
   const smallData=data;data=structuredClone(data);data.job={};data.nodes=Array.from({length:1203},(_,i)=>({key:i.toString(16).padStart(32,'0'),name:'Profile '+i,subscription:'Source '+Math.floor(i/40),type:'vless',eligible:true,server:'example.org',port:443}));data.runtime={available:true,measurements:{}};
@@ -300,5 +316,5 @@ const all=n=>[n,...n.children.flatMap(all)];
   data=smallData;app.data=data;app.search='';app.nodePage=0;
   data.job={status:'running',message:'Testing'};app.data=data;app.navigate('overview');
  assert(app.busy(),'Operation not busy');
- console.log('PASS: seven views, connection monitor, privacy audit/self-test, ad-filter/FakeIP TTL, DHCP/DNS and storage controls, local list import, fail-closed control, community SRS catalogue/interface routes, split DNS/source-interface sections, text escaping, subscription dialog/provider headers, batch import and per-row report, deletion confirmation, rule save RPC, staged independent section selection, country allow/deny, ping strategy/thresholds, actual runtime choice, busy state.');
+ console.log('PASS: eight views, connection monitor, privacy audit/self-test, ad-filter/FakeIP TTL, DHCP/DNS and storage controls, local list import, fail-closed control, community SRS catalogue/interface routes, split DNS/source-interface sections, text escaping, subscription dialog/provider headers, batch import and per-row report, deletion confirmation, rule save RPC, staged independent section selection, country allow/deny, ping strategy/thresholds, actual runtime choice, busy state.');
 })().catch(e=>{console.error(e);process.exit(1)});

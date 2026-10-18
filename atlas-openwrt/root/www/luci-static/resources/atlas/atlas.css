@@ -134,26 +134,12 @@
 }
 @media(max-width:420px){.atlas .at-nav{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
-/* A phone must show the complete connection without horizontal scrolling. */
-@container(max-width:650px){
- .atlas .at-connection-rows .at-table,.atlas .at-connection-rows .at-table tbody{display:block;width:100%;min-width:0}
- .atlas .at-connection-rows .at-table thead{display:none}
- .atlas .at-connection-rows .at-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 10px;padding:10px;min-width:0}
- .atlas .at-connection-rows .at-table td{display:block;width:auto;min-width:0;padding:3px 0;overflow-wrap:anywhere}
- .atlas .at-connection-rows .at-table td:nth-child(1),.atlas .at-connection-rows .at-table td:nth-child(4),.atlas .at-connection-rows .at-table td:nth-child(5){grid-column:1/-1}
- .atlas .at-connection-rows .at-table td::before{display:block;content:attr(data-label);font-size:10px;color:var(--at-muted);margin-bottom:3px}
- .atlas .at-connection-rows .at-table td small{max-width:none;overflow-wrap:anywhere}
- .atlas .at-connection-rows{overflow-x:visible}
-}
-
 /* LuCI themes may break every button word; menu labels wrap only at spaces. */
 .atlas .at-nav button,.atlas .at-nav-text{word-break:normal;overflow-wrap:normal;white-space:normal}
 .atlas .at-nav-text{min-width:0;flex:1;line-height:1.4}
 .atlas .at-nav-icon,.atlas .at-nav small{flex-shrink:0}
 @media(min-width:651px) and (max-width:1150px){.atlas .at-nav button{gap:8px;padding:10px 8px;font-size:13px}}
 
-/* Size connection rows against their own card, including LuCI sidebars. */
-.atlas .at-connection-rows{container-type:inline-size}
 
 /* Show the scope of profile filters beside the display-only override. */
 .atlas .at-profile-filter-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid #a68bff80;border-left:4px solid var(--at-accent);border-radius:9px;background:#a68bff12;min-width:0}
@@ -185,4 +171,97 @@
  .atlas .at-service-summary,.atlas .at-wizard-start{padding:14px}
  .atlas .at-service-summary .at-hero-copy{gap:10px}
  .atlas .at-service-summary h2{font-size:19px}
+}
+
+/* One compact rhythm for information cards and controls. */
+.atlas .at-content{gap:12px;padding:16px 18px}
+.atlas .at-content .at-content{padding:0;gap:10px}
+.atlas .at-topbar{padding:14px 18px}
+.atlas .at-card{border-radius:9px}
+.atlas .at-padded{padding:14px}
+.atlas .at-card>.at-section-head{padding:12px 14px}
+.atlas .at-padded>.at-section-head{padding:0}
+.atlas h3{font-size:15px}
+.atlas .at-section-head{gap:8px}
+.atlas .at-section-head p{font-size:12px;line-height:1.45;margin-top:3px}
+.atlas .at-card>.at-footnote{padding:6px 14px}
+.atlas .at-padded>.at-footnote{padding:0;margin-top:7px}
+.atlas .at-footnote{font-size:12px;line-height:1.45}
+.atlas .at-btn{min-height:32px;padding:6px 10px;font-size:12px}
+.atlas .at-actions{gap:6px}
+.atlas .at-field{margin:9px 0;gap:5px}
+.atlas .at-input{min-height:36px;padding:7px 10px!important}
+.atlas .at-stat{padding:12px 14px}
+.atlas .at-stat strong{margin:5px 0 3px;font-size:22px}
+.atlas .at-stat small{font-size:11px;line-height:1.4}
+.atlas .at-stat-title{font-size:9px;letter-spacing:1px}
+.atlas .at-stats{gap:8px}
+.atlas .at-auto-card{padding:12px 14px;gap:10px}
+.atlas .at-auto-card p{margin-top:3px;font-size:12px}
+.atlas .at-runtime-summary h3{font-size:12px;color:var(--at-muted)}
+.atlas .at-runtime-name{margin:4px 0!important;font-size:16px}
+.atlas .at-privacy-list{gap:4px;margin:8px 0}
+.atlas .at-privacy-list:empty{display:none}
+.atlas .at-privacy-row{padding:6px 0;gap:8px}
+.atlas .at-security-steps{margin:10px 0;gap:6px}
+.atlas .at-security-result{padding:8px 0;gap:8px}
+.atlas .at-advanced{padding:12px;margin:0}
+.atlas .at-advanced-content{padding-top:10px!important}
+.atlas .at-service-grid{gap:8px;margin:10px 0}
+.atlas .at-service-card{padding:12px}
+.atlas .at-service-card p{margin-bottom:8px}
+.atlas .at-sub-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:10px;align-items:start}
+.atlas .at-sub-card .at-sub-row{padding:10px 12px;gap:8px}
+.atlas .at-sub-row strong{font-size:13px}
+.atlas .at-sub-row small{font-size:11px;margin-top:2px}
+.atlas .at-sub-icon{width:28px;height:30px;font-size:17px}
+.atlas .at-sub-card .at-details{grid-template-columns:92px minmax(0,1fr);gap:5px 10px;margin:10px 12px;font-size:12px;line-height:1.4}
+.atlas .at-sub-technical{margin:0 12px 9px;font-size:11px;color:var(--at-muted)}
+.atlas .at-sub-technical>summary{cursor:pointer;width:fit-content}
+.atlas .at-sub-technical .at-details{margin:7px 0}
+.atlas .at-sub-card .at-card-footer{padding:8px 12px;gap:6px}
+.atlas .at-sub-card .at-footnote{font-size:11px;margin:0}
+.atlas .at-subscription-scroll{max-height:234px}
+.atlas .at-subscription-scroll .at-sub-row{min-height:78px;padding:10px 12px}
+.atlas .at-profile-filter-bar{padding:8px 10px;gap:8px}
+.atlas .at-profile-filter-summary small{margin-top:2px}
+.atlas .at-profile-rows .at-table td{padding:8px 10px}
+.atlas .at-profile-rows .at-table td .at-btn{min-height:32px;padding:6px 9px;font-size:12px;margin-top:4px}
+.atlas .at-measurement strong{font-size:12px;margin-bottom:2px}
+.atlas .at-table td small{margin-top:2px;font-size:11px;line-height:1.35}
+/* The complete row, including gaps between cells, marks a live selection. */
+.atlas .at-profile-rows .at-table tr.selected{background:#163f3b;outline:1px solid #6fdbc0;outline-offset:-1px;box-shadow:inset 4px 0 #6fdbc0}
+.atlas .at-profile-rows .at-table tr.selected td{background:transparent}
+.atlas .at-profile-rows .at-table tr.selected strong{color:#d3fff1}
+.atlas .at-profile-rows .at-table tr.selected small{color:#b4d4ce}
+/* Connection information is a compact list, independent of editable tables. */
+.atlas .at-flow-list{margin-top:8px;border:1px solid var(--at-line);border-radius:7px;container-type:inline-size;overflow:hidden}
+.atlas .at-flow{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) auto;align-items:center;gap:4px 12px;padding:8px 10px;border-bottom:1px solid var(--at-line);font-size:12px;line-height:1.4;min-width:0}
+.atlas .at-flow:last-child{border-bottom:0}
+.atlas .at-flow>*{min-width:0;overflow-wrap:anywhere}
+.atlas .at-flow-target{font-size:12px}
+.atlas .at-flow-origin{display:flex;align-items:center;flex-wrap:wrap;gap:3px 6px;color:var(--at-muted);font-size:11px}
+.atlas .at-flow-protocol{font-size:10px;color:#c7d2e8;background:#ffffff0a;border-radius:3px;padding:1px 4px}
+.atlas .at-flow-route{color:#bcc8de;font-size:11px}
+.atlas .at-flow-traffic{font-size:11px;font-variant-numeric:tabular-nums}
+@container(max-width:650px){
+ .atlas .at-flow{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:3px 8px;padding:7px 9px}
+ .atlas .at-flow-target{grid-column:1/-1}
+ .atlas .at-flow-origin{grid-column:1;grid-row:2}
+ .atlas .at-flow-route{grid-column:2;grid-row:2}
+ .atlas .at-flow-traffic{grid-column:1/-1}
+}
+@container(max-width:900px){
+ .atlas .at-profile-rows .at-table tr{gap:6px;padding:9px 10px}
+ .atlas .at-profile-rows .at-table td{padding:0}
+}
+@media(max-width:650px){
+ .atlas .at-content{padding:12px 10px;gap:10px}
+ .atlas .at-padded{padding:11px}
+ .atlas .at-topbar{padding:12px 10px}
+ .atlas .at-btn{min-height:36px}
+ .atlas .at-auto-card{flex-wrap:wrap;padding:10px 12px}
+ .atlas .at-auto-card .at-btn{align-self:start}
+ .atlas .at-sub-grid{grid-template-columns:minmax(0,1fr)}
+ .atlas .at-stat{padding:10px}
 }
