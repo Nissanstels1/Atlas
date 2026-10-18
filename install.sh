@@ -23,10 +23,10 @@ elif command -v apk >/dev/null 2>&1; then
 else echo 'No supported package manager.'; exit 1
 fi
 # Install the verified post-release fixes from one immutable source revision.
-repair_ref=00575ce9052ce683ea91a2f149790fb7490197fe
+repair_ref=df5a4381cef8216cf2bf2d806e98ce2652a2a1d2
 wget -q -O "$directory/repair.sh" "https://raw.githubusercontent.com/Nissanstels1/Atlas/$repair_ref/atlas-openwrt/tools/repair-nanopi-audit.sh"
 actual=$(sha256sum "$directory/repair.sh" | awk '{print $1}')
-[ "$actual" = 'dffa5a76529d03daad4b018a1dec3dd8669a17e36c74c879fbb3a328ffaaccf3' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
+[ "$actual" = 'afd5ac05972c39be637ea4a88ee054487b12e2e63cb574f4729f374a70c8bdc5' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
 # Pin the repair's source downloads too; future main changes cannot mix revisions.
 /usr/bin/python3 - "$directory/repair.sh" "$repair_ref" <<'PY'
 from pathlib import Path
