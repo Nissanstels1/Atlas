@@ -83,9 +83,21 @@ const root=path.resolve(__dirname,'..');
   if(latency.ratio<4.5||latency.background===latency.row)throw Error('Latency is not readable on active row: '+JSON.stringify(latency));
   await page.evaluate(()=>{app.liveSections[0].groups[0].selected=app.data.nodes[0].key;app.updateNodeTable();});
   if(await page.locator('.at-profile-rows tr.selected').count()!==2)throw Error('Unused auto leaf highlighted in manual mode');
+  await page.evaluate(()=>{app.liveSections[0].groups[1].members=[{tag:'section_'+'a'.repeat(16)+'_'+'e'.repeat(32)}];app.updateNodeTable();});
+  if(!(await page.locator('.at-profile-sync-note').isVisible())||!(await page.locator('.at-profile-sync-note').innerText()).includes('1'))throw Error('Unsynchronised active member is hidden');
+  await page.evaluate(()=>{app.liveSections=[];app.updateNodeTable();});
+  if(await page.locator('.at-profile-sync-note').isVisible())throw Error('Stale synchronisation message remained');
   for(const width of [390,1440]){
    await page.setViewportSize({width,height:1000});
    await page.evaluate(()=>{app.tab='monitor';app.monitor={available:true,connections:Array.from({length:10},(_,i)=>({host:'media'+i+'.example.org',source:'192.168.1.25:12345',network:'tcp',chains:['direct'],upload:12345,download:67890})),rules:Array.from({length:10},()=>({type:'default',payload:'protocol=dns',outbound:'hijack-dns'}))};app.draw();});
+   if(width===390){
+    if(await page.locator('.at-monitor-panel[open]').count())throw Error('Monitor panels must start collapsed');
+    await page.locator('.at-monitor-panel>summary').nth(0).click();
+    await page.locator('.at-monitor-panel>summary').nth(1).click();
+    await page.evaluate(()=>{app.monitor.connections.push(app.monitor.connections[0]);app.draw();});
+    if(await page.locator('.at-monitor-panel[open]').count()!==2)throw Error('Panel state lost when counters updated');
+    await page.evaluate(()=>{app.monitor.connections.pop();app.draw();});
+   }
    const heights=await page.locator('.at-flow').evaluateAll(rows=>rows.map(e=>e.getBoundingClientRect().height));
    if(heights.length!==10||Math.max(...heights)>(width<650?95:65))throw Error(JSON.stringify({width,heights}));
    const ruleHeights=await page.locator('article.at-rule').evaluateAll(rows=>rows.map(e=>e.getBoundingClientRect().height));

@@ -277,3 +277,17 @@
 .atlas .at-rule-outbound{color:#cfc3ff}
 .atlas .at-rule-head{font-size:10px;color:var(--at-muted);background:#191e29;padding-top:5px;padding-bottom:5px}
 @container(max-width:420px){.atlas .at-rule{grid-template-columns:44px minmax(0,1.4fr) minmax(0,1fr);gap:3px 6px;padding:5px 7px;font-size:11px}.atlas .at-rule-type{font-size:10px}}
+
+/* Profile rows show essential status without repeating idle manual-test text. */
+.atlas .at-profile-title{display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 7px}
+.atlas .at-profile-title .at-pill{margin:0;font-size:10px;padding:2px 5px}
+.atlas .at-profile-rows .at-table td{padding-top:7px;padding-bottom:7px}
+.atlas .at-profile-actions{align-items:flex-start;justify-content:flex-start;gap:4px}
+.atlas .at-profile-sync-note{margin:0;padding:6px 9px;border-left:3px solid #caa65b;background:#caa65b10}
+@container(max-width:900px){.atlas .at-profile-actions{flex-direction:column}.atlas .at-profile-rows .at-table tr{padding-top:7px;padding-bottom:7px}.atlas .at-profile-rows .at-table td{padding:0}}
+
+.atlas .at-monitor-panel>summary{cursor:pointer;padding:10px 12px;font-size:14px;font-weight:600;line-height:1.4}
+.atlas .at-monitor-panel>summary .at-pill{margin-left:8px;font-size:11px;vertical-align:middle}
+.atlas .at-monitor-panel[open]>summary{border-bottom:1px solid var(--at-line)}
+.atlas .at-monitor-panel>.at-padded{padding:8px}
+.atlas .at-monitor-panel .at-flow-list,.atlas .at-monitor-panel .at-rule-list{margin-top:0}

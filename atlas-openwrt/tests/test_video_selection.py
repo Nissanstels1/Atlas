@@ -15,6 +15,14 @@ from test_selection import sample
 
 
 class VideoSelection(unittest.TestCase):
+    def test_150ms_is_improvement_margin_not_maximum_rtt(self):
+        rows=[(0,0,151,151,'current'),(0,0,73,73,'finland')]
+        settings=core.validate_settings({'auto_tolerance_ms':150})
+        self.assertEqual(core.rank_auto_candidates(rows,settings,'current'),'current')
+        settings['auto_tolerance_ms']=20
+        self.assertEqual(core.rank_auto_candidates(rows,settings,'current'),'finland')
+        self.assertEqual(core.rank_auto_candidates(rows[1:],settings,'current'),'finland')
+
     def measured(self, **settings):
         current = sample()
         current['settings'].update(max_ping_ms=1000, auto_tolerance_ms=50, **settings)

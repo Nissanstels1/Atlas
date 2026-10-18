@@ -271,7 +271,7 @@ function atlasHelp(title,hint) {
         [/^Критерий пинга$/,'Определяет, как сравнивать рабочие серверы. Минимальный пинг — меньшая задержка ответа; стабильный — меньше колебаний; максимальный — большая задержка. Пинг здесь измеряется запросом через прокси, а не обычной командой ping.','','','Для обычного автовыбора подходит минимальный пинг.'],
         [/^Минимальный пинг/,'Отбрасывает слишком маленькие измеренные задержки. 0 отключает нижний предел. Это не ускоряет серверы, а только ограничивает выбор.','','','100 означает не выбирать сервер с задержкой меньше 100 мс.'],
         [/^Максимальный пинг/,'Отбрасывает серверы с задержкой больше указанной. 0 отключает верхний предел. Если все серверы превышают предел, прокси-секция не переходит напрямую.','','','500 означает не выбирать сервер с задержкой больше 500 мс.'],
-        [/Допустимая разница|Порог улучшения/,'Уменьшает лишние переключения между серверами с похожей задержкой. При обычном выборе самого быстрого сервера небольшое улучшение в пределах допуска не требует смены. При отказе сервера ищется рабочая замена.','','','80 мс: улучшение с 150 до 130 мс не требует лишнего переключения.'],
+        [/Допустимая разница|Порог улучшения/,'Задаёт, насколько быстрее должен быть новый сервер, чтобы заменить работающий. Это разница между двумя задержками, а не максимальный разрешённый пинг. Если улучшение меньше или равно порогу, текущий сервер остаётся. При отказе текущего сервера порог не мешает выбрать рабочую замену.','','','Текущий сервер: 151 мс, новый: 73 мс. Улучшение 78 мс: при пороге 150 мс переключения не будет; при пороге 20 мс новый сервер подходит.'],
         [/^Проверять каждые|^Интервал, секунд$/,'Задаёт, как часто повторять автоматические проверки серверов. Меньшее число — больше проверочных запросов. Проверка может занять дольше интервала, если серверы не отвечают или их много.','','','60 — проверять примерно раз в минуту; это не скорость скачивания.'],
         [/^Обновлять подписки|^Проверять обновления/,'Задаёт интервал скачивания новых профилей и внешних списков, в часах. Это отдельное расписание: оно не меняет частоту проверки серверов. При ошибке загрузки сохраняется прежняя рабочая копия.','','','24 — обновлять примерно раз в сутки.'],
         [/^Активный пул профилей$/,'Ограничивает число профилей, которые загружаются в работающий движок, чтобы уменьшить расход памяти. Остальные остаются сохранёнными, но могут не участвовать в фоновой проверке.','','','512 — предел активных профилей, а не числа добавленных подписок.'],
@@ -389,7 +389,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=contrast-rules-20261018' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=selection-clarity-20261018' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -621,6 +621,7 @@ return view.extend({
         var search = node('input', 'at-input at-search', [], { placeholder: 'Поиск сервера или подписки…', value: self.search, 'aria-label': 'Поиск сервера', focus: function() { self.searchFocused = true; }, blur: function() { self.searchFocused = false; } });
         var container = node('div', 'at-table-wrap at-profile-rows');
         var pages = node('div', 'at-actions at-profile-pages', [], { 'aria-label': 'Страницы профилей' });
+        var syncNote=node('p','at-footnote at-profile-sync-note',[],{hidden:true});
         var filterSummary = node('div', 'at-profile-filter-summary', [], { role: 'status', 'aria-live': 'polite' });
         var showAll = node('input', '', [], { type: 'checkbox', checked: !!self.showExcludedProfiles });
         var filterBar = node('div', 'at-profile-filter-bar', [filterSummary, atlasElement('label', { 'class': 'at-checkbox' }, [showAll, label('Показать все профили')])]);
@@ -634,6 +635,9 @@ return view.extend({
             filterSummary.replaceChildren(node('strong', '', label(self.showExcludedProfiles ? 'Показаны все профили' : excluded ? 'Список отфильтрован' : 'Все профили проходят фильтры')),
                 node('small', '', label('Прошли фильтры: ' + allowed.length + ' из ' + d.nodes.length + '. ' + (self.showExcludedProfiles ? 'Исключены из выбора: ' : 'Скрыто из списка: ') + excluded + '.')));
             var activeProfiles=atlasActiveProfiles(d,self.liveSections);
+            var known=Object.create(null),oldMembers=Object.create(null);d.nodes.forEach(function(n){known[n.key]=true;});
+            (self.liveSections || []).forEach(function(section){(section.groups || []).forEach(function(group){(group.members || []).forEach(function(m){var match=String(m.tag || '').match(/(?:^|_)([a-f0-9]{32})$/);if(match && !known[match[1]])oldMembers[match[1]]=true;});});});
+            var oldCount=Object.keys(oldMembers).length;syncNote.hidden=!oldCount;syncNote.textContent=oldCount ? 'Каталог изменён: в работающем движке осталось старых профилей — '+oldCount+'. Чтобы синхронизировать состав, нажмите «Применить изменения» в обзоре.' : '';
             var matches = visible.filter(function(n) { return (n.name + ' ' + n.subscription).toLowerCase().indexOf(query) >= 0; });
             var size = 50, last = Math.max(0, Math.ceil(matches.length / size) - 1);
             self.nodePage = Math.max(0, Math.min(self.nodePage || 0, last));
@@ -648,8 +652,8 @@ return view.extend({
                 node('tbody', '', list.map(function(n) {
                     var c = checks[n.key], live=measured[n.key],fresh=liveMeasurementFresh(live,d.settings.auto_interval_seconds);
                     var active=!!activeProfiles[n.key];
-                    var measurement=node('div','at-measurement',[node('strong','',label('Автоматический замер')),pill(live ? !fresh ? 'Замер устарел' : live.ok ? live.latency_ms+' мс' : 'Не прошёл' : 'Нет замера',live && fresh ? live.ok ? 'success at-latency' : 'danger' : 'neutral'),node('small','',label(live ? liveDate(live.checked_at) : n.eligible === false ? 'Профиль исключён фильтрами' : 'Нет успешного фонового замера: профиль недоступен или отсутствует в активном пуле')),node('small','',label('Ручной HTTPS-тест: '+(!c ? 'не запускался' : c.ok ? c.latency_ms+' мс · '+date(c.checked) : 'не прошёл · '+date(c.checked))),{'title':c && c.error || ''})]);
-                    return node('tr', active ? 'selected' : '', [node('td', '', [node('strong', '', label(n.name)), node('small', '', label(n.server + ':' + n.port)), node('small','at-profile-meta',label(n.type.toUpperCase()+' · '+(n.country || '—')+' · '+n.subscription)), node('div','at-compact-only',self.button('IP выхода',function(){return self.action('geo_check',n.key);},'small',self.busy())), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label(''), active ? pill('Активен', 'success') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', self.button('В секцию',function(){self.navigate('routing');},'small',self.busy()))]);
+                    var measurement=node('div','at-measurement',[node('strong','',label('Автопроверка')),pill(live ? !fresh ? 'Замер устарел' : live.ok ? live.latency_ms+' мс' : 'Не прошёл' : 'Нет замера',live && fresh ? live.ok ? 'success at-latency' : 'danger' : 'neutral'),node('small','',label(live ? liveDate(live.checked_at) : n.eligible === false ? 'Профиль исключён фильтрами' : 'Ожидается успешный замер')),c ? node('small','',label('Вручную: '+(c.ok ? c.latency_ms+' мс' : 'не прошёл')+' · '+date(c.checked)),{'title':c.error || ''}) : label('')]);
+                    return node('tr', active ? 'selected' : '', [node('td', '', [node('div','at-profile-title',[node('strong', '', label(n.name)),active ? pill('Активен','success') : label('')]), node('small', '', label(n.server + ':' + n.port)), node('small','at-profile-meta',label(n.type.toUpperCase()+' · '+(n.country || '—')+' · '+n.subscription)), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', node('div','at-actions at-profile-actions',[node('div','at-compact-only',self.button('IP выхода',function(){return self.action('geo_check',n.key);},'small',self.busy())),self.button('В секцию',function(){self.navigate('routing');},'small',self.busy())]))]);
                 }))]));
             if (!list.length) container.appendChild(!d.nodes.length ? self.empty('Серверов нет', 'Добавьте и обновите подписку.') : !self.showExcludedProfiles && !allowed.length ? self.empty('Все профили исключены фильтрами', 'Измените общие фильтры или включите «Показать все профили».') : self.empty('Ничего не найдено', 'Измените запрос. Поиск идёт среди показанных профилей.'));
         }
@@ -660,11 +664,11 @@ return view.extend({
         var runtime = d.runtime || {};
         return node('div', 'at-content', [self.sectionHead('Доступные серверы', 'Автоматические замеры обновляются работающим движком для профилей активного пула. Ручной HTTPS-тест запускается кнопкой и показан отдельно. Выбор учитывает фильтры, подписку секции и допустимую разницу задержки; 60 секунд — заданный интервал, а не гарантия нового результата при недоступной сети.', self.button('Ручная HTTPS-проверка', function() { return self.action('probe'); }, 'primary', self.busy() || !eligible)),
             node('p', 'at-footnote', label('Проверка страны выполняет HTTPS запрос через выбранный профиль к ipapi.co. Сервис видит выходной IP; Atlas сохраняет только код страны и время. При изменении страны фильтры применяются заново; если допустимых серверов нет, туннель останавливается с fail-closed.')),
-            node('div', 'at-auto-card', [node('div', '', [node('strong', '', label('Фильтры профилей')), node('p', '', label('Выбор: ' + ({fastest:'по задержке',balanced:'сбалансированный',stable:'стабильный'}[d.settings.auto_strategy] || 'по задержке') + ' · допущено ' + eligible + ' из ' + d.nodes.length)), node('p', '', label('Разрешённые страны: ' + ((d.settings.countries || []).join(', ') || 'все') + ' · исключены: ' + ((d.settings.excluded_countries || []).join(', ') || 'нет') + ' · ' + (d.settings.selected === 'auto' ? 'автоматический режим' : 'ручной выбор')))]), self.button('Общие фильтры профилей', function() { self.autoDialog(); }, '', self.busy())]),
+            node('div', 'at-auto-card', [node('div', '', [node('strong', '', label('Фильтры профилей')), node('p', '', label('Выбор: ' + ({fastest:'по задержке',balanced:'сбалансированный',stable:'стабильный'}[d.settings.auto_strategy] || 'по задержке') + ' · допущено ' + eligible + ' из ' + d.nodes.length)), node('p', '', label('Разрешённые страны: ' + ((d.settings.countries || []).join(', ') || 'все') + ' · исключены: ' + ((d.settings.excluded_countries || []).join(', ') || 'нет') + ' · ' + (d.settings.selected === 'auto' ? 'автоматический режим' : 'ручной выбор') + ' · порог смены: '+d.settings.auto_tolerance_ms+' мс'))]), self.button('Общие фильтры профилей', function() { self.autoDialog(); }, '', self.busy())]),
             node('section', 'at-card at-padded at-runtime-summary', [node('h3', '', label('Текущий общий профиль')), node('p', 'at-runtime-name', label(runtime.available && runtime.selected ? runtime.name : runtime.message || 'Данные движка недоступны')), runtime.selected ? node('p', 'at-footnote', label((runtime.automatic || d.settings.selected === 'auto' ? 'Автоматический режим' : 'Вручную') + ' · в активной группе: ' + runtime.candidate_count + (runtime.last_delay_ms ? ' · последний замер: ' + runtime.last_delay_ms + ' мс (' + liveDate(runtime.last_check) + ')' : ''))) : label(''), node('p', 'at-footnote', label('Выбор узла сам по себе не подтверждает доступность соединения. После изменения настроек активная группа обновляется при применении.'))]),
-            node('section', 'at-card at-padded', [node('h3', '', label('Пулы подписок')), node('div', '', (runtime.groups || []).map(function(g) { var sub = d.subscriptions.find(function(x) { return 'pool_' + x.id === g.group; }); return node('p', 'at-footnote', label((sub ? sub.name : g.group) + ': ' + g.name)); }))]),
+            (runtime.groups || []).length ? node('section', 'at-card at-padded', [node('h3', '', label('Пулы подписок')), node('div', '', (runtime.groups || []).map(function(g) { var sub = d.subscriptions.find(function(x) { return 'pool_' + x.id === g.group; }); return node('p', 'at-footnote', label((sub ? sub.name : g.group) + ': ' + g.name)); }))]) : label(''),
             eligible === 1 ? node('p', 'at-inline-error', label('Фильтры оставили один узел. При его отказе переключаться не на что; другая страна автоматически не добавится.')) : label(''),
-            filterBar, search, pages, container, node('p', 'at-footnote', label('По умолчанию показаны только профили, прошедшие общие фильтры. Поиск действует среди показанных профилей на всех страницах. «Показать все профили» открывает и исключённые для просмотра; автовыбор по-прежнему использует только разрешённые.'))]);
+            filterBar, syncNote, search, pages, container, node('p', 'at-footnote', label('По умолчанию показаны только профили, прошедшие общие фильтры. Поиск действует среди показанных профилей на всех страницах. «Показать все профили» открывает и исключённые для просмотра; автовыбор по-прежнему использует только разрешённые.'))]);
     },
     autoDialog: function() {
         var self = this, s = self.data.settings;
@@ -697,7 +701,7 @@ return view.extend({
             self.field('Протоколы', protocols, 'vless, vmess, trojan, shadowsocks, hysteria2, tuic, socks, http'),
             self.field('Название содержит', include, 'Оставить только профили с указанным текстом в названии. Например LTE — останутся только LTE. Несколько значений через запятую: достаточно любого совпадения. Регистр не важен. Пусто — разрешить все названия.'),
             self.field('Исключить по названию', exclude, 'Например LTE — все профили с LTE в названии исключаются из доступного пула и автовыбора, остальные остаются. Регистр не важен; ищется часть названия, без регулярных выражений. Исключение имеет приоритет над полем «Название содержит». Пусто — никого не исключать.'),
-            self.field('Проверять каждые, секунд', interval), self.field('Порог улучшения задержки, мс', tolerance, 'Уменьшает переключения при небольших колебаниях. Недоступный узел не удерживается этим порогом.'),
+            self.field('Проверять каждые, секунд', interval), self.field('Порог улучшения задержки, мс', tolerance, 'Новый сервер должен быть быстрее текущего более чем на указанное число. Например, 151 → 73 мс — улучшение только 78 мс: порог 150 мс удержит текущий сервер. Для более частого выбора быстрого сервера можно задать 20 мс. Максимальный допустимый пинг задаётся отдельным полем выше.'),
             node('label', 'at-checkbox', [interrupt, label('Разрывать текущие соединения при переключении')]),
             node('p', 'at-footnote', label('Если выключено, новые соединения идут через выбранный сервер, текущие сохраняются. Если включено, переключение может прервать звонки и загрузки.')),
             node('p', 'at-footnote', label('Эти фильтры ограничивают профили во всех использующих их секциях. Они не включают автовыбор вместо ручного режима: режим каждой секции задаётся в её настройках. При нестандартных критериях трафик группы блокируется, пока нет свежего подходящего замера. Atlas Engine r2 и новее продолжает фоновые проверки без трафика; обычный sing-box приостанавливает их после 30 минут простоя.')), msg]),
@@ -1298,7 +1302,7 @@ return view.extend({
             ]),
             node('div', '', (resources.warnings || []).map(function(warning) { return node('div', 'at-notice', label(warning)); })),
             node('p', 'at-footnote', label('Снимок обновляется, пока открыт монитор. Большой кэш сам по себе не доказывает утечку; автоматическая очистка не выполняется, чтобы сохранить действующие FakeIP-сопоставления.')),
-            node('section', 'at-card at-padded', [node('h3', '', label('Активные соединения')),
+            atlasElement('details', {'class':'at-card at-monitor-panel'}, [atlasElement('summary',{'aria-label':'Активные соединения'},[label('Активные соединения'),pill(String(connections.length),'neutral')]),node('div','at-padded',[
                 connections.length ? node('div', 'at-flow-list', connections.map(function(c) {
                     var target=c.host || c.destination || 'неизвестный адрес';
                     var rule=c.rule ? c.rule + (c.rule_payload ? ' · '+c.rule_payload : '') : 'Правило не указано';
@@ -1309,8 +1313,8 @@ return view.extend({
                         node('div', 'at-flow-traffic', label('↑ '+bytes(c.upload)+' · ↓ '+bytes(c.download)), {'title':'Отправлено · получено'})
                     ], {'aria-label':'Соединение: '+target});
                 })) : node('p', 'at-footnote', label(m.available ? 'Активных соединений сейчас нет.' : 'Нет данных от движка.'))
-            ]),
-            node('section', 'at-card at-padded', [node('h3', '', label('Правила работающего движка')),
+            ])]),
+            atlasElement('details', {'class':'at-card at-monitor-panel'}, [atlasElement('summary',{'aria-label':'Правила работающего движка'},[label('Правила работающего движка'),pill(String(rules.length),'neutral')]),node('div','at-padded',[
                 rules.length ? node('div', 'at-rule-list', [
                     node('div','at-rule at-rule-head',[node('span','',label('Тип')),node('span','',label('Условие')),node('span','',label('Выход'))],{'aria-hidden':'true'}),
                     rules.map(function(r){return node('article','at-rule',[
@@ -1319,7 +1323,7 @@ return view.extend({
                         node('span','at-rule-outbound',label(r.outbound || '—'),{'aria-label':'Выход правила'})
                     ]);})
                 ]) : node('p', 'at-footnote', label('Правил нет или API недоступен.'))
-            ]),
+            ])]),
             node('p', 'at-footnote', label('Хосты, источники, правила и счётчики могут раскрывать привычки использования сети. LuCI получает их только при открытой этой вкладке; API sing-box привязан к 127.0.0.1.'))
         ]);
     },
