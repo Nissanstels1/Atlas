@@ -389,7 +389,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=dense-interface-20261018' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=contrast-rules-20261018' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -648,7 +648,7 @@ return view.extend({
                 node('tbody', '', list.map(function(n) {
                     var c = checks[n.key], live=measured[n.key],fresh=liveMeasurementFresh(live,d.settings.auto_interval_seconds);
                     var active=!!activeProfiles[n.key];
-                    var measurement=node('div','at-measurement',[node('strong','',label('Автоматический замер')),pill(live ? !fresh ? 'Замер устарел' : live.ok ? live.latency_ms+' мс' : 'Не прошёл' : 'Нет замера',live && fresh ? live.ok ? 'success' : 'danger' : 'neutral'),node('small','',label(live ? liveDate(live.checked_at) : n.eligible === false ? 'Профиль исключён фильтрами' : 'Нет успешного фонового замера: профиль недоступен или отсутствует в активном пуле')),node('small','',label('Ручной HTTPS-тест: '+(!c ? 'не запускался' : c.ok ? c.latency_ms+' мс · '+date(c.checked) : 'не прошёл · '+date(c.checked))),{'title':c && c.error || ''})]);
+                    var measurement=node('div','at-measurement',[node('strong','',label('Автоматический замер')),pill(live ? !fresh ? 'Замер устарел' : live.ok ? live.latency_ms+' мс' : 'Не прошёл' : 'Нет замера',live && fresh ? live.ok ? 'success at-latency' : 'danger' : 'neutral'),node('small','',label(live ? liveDate(live.checked_at) : n.eligible === false ? 'Профиль исключён фильтрами' : 'Нет успешного фонового замера: профиль недоступен или отсутствует в активном пуле')),node('small','',label('Ручной HTTPS-тест: '+(!c ? 'не запускался' : c.ok ? c.latency_ms+' мс · '+date(c.checked) : 'не прошёл · '+date(c.checked))),{'title':c && c.error || ''})]);
                     return node('tr', active ? 'selected' : '', [node('td', '', [node('strong', '', label(n.name)), node('small', '', label(n.server + ':' + n.port)), node('small','at-profile-meta',label(n.type.toUpperCase()+' · '+(n.country || '—')+' · '+n.subscription)), node('div','at-compact-only',self.button('IP выхода',function(){return self.action('geo_check',n.key);},'small',self.busy())), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label(''), active ? pill('Активен', 'success') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', self.button('В секцию',function(){self.navigate('routing');},'small',self.busy()))]);
                 }))]));
             if (!list.length) container.appendChild(!d.nodes.length ? self.empty('Серверов нет', 'Добавьте и обновите подписку.') : !self.showExcludedProfiles && !allowed.length ? self.empty('Все профили исключены фильтрами', 'Измените общие фильтры или включите «Показать все профили».') : self.empty('Ничего не найдено', 'Измените запрос. Поиск идёт среди показанных профилей.'));
@@ -1310,11 +1310,15 @@ return view.extend({
                     ], {'aria-label':'Соединение: '+target});
                 })) : node('p', 'at-footnote', label(m.available ? 'Активных соединений сейчас нет.' : 'Нет данных от движка.'))
             ]),
-            node('section', 'at-card at-padded', [node('h3', '', label('Правила, совпавшие с трафиком')),
-                rules.length ? node('div', 'at-table-wrap', [node('table', 'at-table', [
-                    node('thead', '', [node('tr', '', ['Тип','Условие','Выход'].map(function(x) { return node('th', '', label(x)); }))]),
-                    node('tbody', '', rules.map(function(r) { return node('tr', '', [node('td', '', label(r.type)), node('td', '', label(r.payload)), node('td', '', label(r.outbound))]); }))
-                ])]) : node('p', 'at-footnote', label('Сработавших правил нет или API недоступен.'))
+            node('section', 'at-card at-padded', [node('h3', '', label('Правила работающего движка')),
+                rules.length ? node('div', 'at-rule-list', [
+                    node('div','at-rule at-rule-head',[node('span','',label('Тип')),node('span','',label('Условие')),node('span','',label('Выход'))],{'aria-hidden':'true'}),
+                    rules.map(function(r){return node('article','at-rule',[
+                        node('span','at-rule-type',label(r.type || '—'),{'aria-label':'Тип правила'}),
+                        node('span','at-rule-condition',label(r.payload || '—'),{'aria-label':'Условие правила'}),
+                        node('span','at-rule-outbound',label(r.outbound || '—'),{'aria-label':'Выход правила'})
+                    ]);})
+                ]) : node('p', 'at-footnote', label('Правил нет или API недоступен.'))
             ]),
             node('p', 'at-footnote', label('Хосты, источники, правила и счётчики могут раскрывать привычки использования сети. LuCI получает их только при открытой этой вкладке; API sing-box привязан к 127.0.0.1.'))
         ]);

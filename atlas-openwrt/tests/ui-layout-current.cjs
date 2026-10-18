@@ -68,24 +68,33 @@ const root=path.resolve(__dirname,'..');
   // sections, without marking an unused urltest winner in manual mode.
   await page.evaluate(()=>{
    const base=app.data.nodes[0];app.data.nodes=[base,{...base,key:'c'.repeat(32),name:'Pool leaf'},{...base,key:'d'.repeat(32),name:'Section leaf'}];
-   app.data.runtime={available:true,selected:base.key,groups:[{selected:'c'.repeat(32)}]};
+   app.data.runtime={available:true,selected:base.key,groups:[{selected:'c'.repeat(32)}],measurements:{[base.key]:{ok:true,latency_ms:126,checked_at:new Date().toISOString()}}};
    app.tab='nodes';app.draw();
    app.liveSections=[{id:'a'.repeat(16),groups:[{tag:'control',type:'selector',selected:'auto'},{tag:'auto',type:'urltest',selected:'section_'+'a'.repeat(16)+'_'+'d'.repeat(32)}]}];app.updateNodeTable();
   });
   if(await page.locator('.at-profile-rows tr.selected').count()!==3)throw Error('Missing active pool/section leaf');
   const selectedStyle=await page.locator('.at-profile-rows tr.selected').first().evaluate(e=>({background:getComputedStyle(e).backgroundColor,outline:getComputedStyle(e).outlineWidth,cell:getComputedStyle(e.cells[0]).backgroundColor}));
   if(selectedStyle.background==='rgba(0, 0, 0, 0)'||selectedStyle.outline==='0px'||selectedStyle.cell!=='rgba(0, 0, 0, 0)')throw Error('Active row is not highlighted as a whole');
+  const latency=await page.locator('.selected .at-latency').evaluate(el=>{
+   const colours=getComputedStyle(el),rgb=s=>s.match(/[\d.]+/g).slice(0,3).map(Number),lum=c=>c.map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4}).reduce((n,x,i)=>n+x*[.2126,.7152,.0722][i],0);
+   const fg=lum(rgb(colours.color)),bg=lum(rgb(colours.backgroundColor));
+   return {ratio:(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05),foreground:colours.color,background:colours.backgroundColor,row:getComputedStyle(el.closest('tr')).backgroundColor};
+  });
+  if(latency.ratio<4.5||latency.background===latency.row)throw Error('Latency is not readable on active row: '+JSON.stringify(latency));
   await page.evaluate(()=>{app.liveSections[0].groups[0].selected=app.data.nodes[0].key;app.updateNodeTable();});
   if(await page.locator('.at-profile-rows tr.selected').count()!==2)throw Error('Unused auto leaf highlighted in manual mode');
   for(const width of [390,1440]){
    await page.setViewportSize({width,height:1000});
-   await page.evaluate(()=>{app.tab='monitor';app.monitor={available:true,connections:Array.from({length:10},(_,i)=>({host:'media'+i+'.example.org',source:'192.168.1.25:12345',network:'tcp',chains:['direct'],upload:12345,download:67890}))};app.draw();});
+   await page.evaluate(()=>{app.tab='monitor';app.monitor={available:true,connections:Array.from({length:10},(_,i)=>({host:'media'+i+'.example.org',source:'192.168.1.25:12345',network:'tcp',chains:['direct'],upload:12345,download:67890})),rules:Array.from({length:10},()=>({type:'default',payload:'protocol=dns',outbound:'hijack-dns'}))};app.draw();});
    const heights=await page.locator('.at-flow').evaluateAll(rows=>rows.map(e=>e.getBoundingClientRect().height));
    if(heights.length!==10||Math.max(...heights)>(width<650?95:65))throw Error(JSON.stringify({width,heights}));
+   const ruleHeights=await page.locator('article.at-rule').evaluateAll(rows=>rows.map(e=>e.getBoundingClientRect().height));
+   if(ruleHeights.length!==10||Math.max(...ruleHeights)>45)throw Error(JSON.stringify({width,ruleHeights}));
   }
   if(errors.length)throw Error(errors.join('\n'));
   console.log('PASS: 96 page layouts and 12 section dialogs, inherited LuCI button wrapping, all navigation captions and controls inside their containers.');
   console.log(JSON.stringify(results));
   console.log('PASS: compact connection rows, full active-row colour, pool and independent-section leaf selection, unused auto winner excluded.');
+  console.log('PASS: latency text contrast >= 4.5:1 and compact matched-rule rows at phone and desktop widths.');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

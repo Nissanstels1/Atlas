@@ -265,3 +265,15 @@
  .atlas .at-sub-grid{grid-template-columns:minmax(0,1fr)}
  .atlas .at-stat{padding:10px}
 }
+
+/* Latency remains distinct from the green active-profile background. */
+.atlas .at-measurement .at-latency{color:#ffd5da;background:#512b3b;border:1px solid #bf7a91;font-size:13px;font-weight:750;font-variant-numeric:tabular-nums;padding:3px 8px;line-height:1.35}
+/* Matched rules are read-only rows, never tall editable-table cards. */
+.atlas .at-rule-list{margin-top:7px;border:1px solid var(--at-line);border-radius:7px;overflow:hidden;container-type:inline-size}
+.atlas .at-rule{display:grid;grid-template-columns:minmax(42px,.45fr) minmax(0,2fr) minmax(0,1.2fr);gap:4px 10px;padding:6px 9px;border-bottom:1px solid var(--at-line);font-size:12px;line-height:1.4;align-items:start;min-width:0}
+.atlas .at-rule:last-child{border-bottom:0}
+.atlas .at-rule>span{min-width:0;overflow-wrap:anywhere}
+.atlas .at-rule-type{font-size:11px;color:var(--at-muted)}
+.atlas .at-rule-outbound{color:#cfc3ff}
+.atlas .at-rule-head{font-size:10px;color:var(--at-muted);background:#191e29;padding-top:5px;padding-bottom:5px}
+@container(max-width:420px){.atlas .at-rule{grid-template-columns:44px minmax(0,1.4fr) minmax(0,1fr);gap:3px 6px;padding:5px 7px;font-size:11px}.atlas .at-rule-type{font-size:10px}}
