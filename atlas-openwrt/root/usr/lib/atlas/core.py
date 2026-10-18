@@ -1422,12 +1422,17 @@ def selection_nodes(state, validated=False):
         raise AtlasError('Выбранный сервер отсутствует или исключён фильтром. Выберите другой или Авто.')
     return nodes
 
-def all_nodes(state):
+def all_nodes(state, *, copy_nodes=True):
+    """Collect enabled profiles; read-only projections may borrow nested data.
+
+    Keep isolated copies by default for callers that prepare or edit outbounds.
+    The borrowed variant still creates a separate outer dictionary per profile.
+    """
     nodes = []
     for sub in state['subscriptions']:
         if sub.get('enabled', True):
             for n in sub.get('nodes', []):
-                item = copy.deepcopy(n)
+                item = copy.deepcopy(n) if copy_nodes else dict(n)
                 item['key'] = sub['id'] + n['id']
                 item['subscription'] = sub['name']
                 nodes.append(item)

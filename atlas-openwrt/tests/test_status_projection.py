@@ -15,6 +15,36 @@ class StatusProjection(unittest.TestCase):
     setUp = fixtures.ExtensionsRPC.setUp
     tearDown = fixtures.ExtensionsRPC.tearDown
 
+    def test_read_only_collection_keeps_default_editing_isolation(self):
+        current = atlas.state()
+        stored = current['subscriptions'][0]['nodes'][0]
+        copied = atlas.all_nodes(current)[0]
+        borrowed = atlas.all_nodes(current, copy_nodes=False)[0]
+        self.assertEqual(copied, borrowed)
+        self.assertIsNot(copied['outbound'], stored['outbound'])
+        self.assertIs(borrowed['outbound'], stored['outbound'])
+        borrowed['name'] = 'outer dictionary only'
+        copied['outbound']['server'] = 'changed.example.org'
+        self.assertNotEqual(stored['name'], borrowed['name'])
+        self.assertNotEqual(stored['outbound']['server'], copied['outbound']['server'])
+
+    def test_status_does_not_copy_outbounds_or_expose_borrowed_metadata(self):
+        current = atlas.state()
+        before = copy.deepcopy(current)
+        copied_outbounds = []
+        original = copy.deepcopy
+        outbound_ids = {id(n['outbound']) for s in current['subscriptions'] for n in s['nodes']}
+        def copying(value, *args, **kwargs):
+            if id(value) in outbound_ids:
+                copied_outbounds.append(id(value))
+            return original(value, *args, **kwargs)
+        with mock.patch.object(atlas, 'state', return_value=current), mock.patch.object(atlas.copy, 'deepcopy', side_effect=copying):
+            public = atlas.public_status()
+        self.assertEqual(copied_outbounds, [])
+        self.assertNotIn('outbound', public['nodes'][0])
+        public['nodes'][0]['name'] = 'changed public response'
+        self.assertEqual(current, before)
+
     def test_large_rule_body_is_hidden_and_preserved_after_settings_save(self):
         self.initial['settings']['remote_lists'] = [dict(
             id='c' * 16, name='Large list', url='https://example.org/list?secret=SOURCE_SECRET',

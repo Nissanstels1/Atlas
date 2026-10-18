@@ -2004,7 +2004,9 @@ def active_job():
 def public_status():
     current = state()
     running = service_running()
-    raw_nodes = all_nodes(current)
+    # Status projects scalar metadata and measurements; no outbound is edited
+    # or returned. Avoid copying every nested credential/transport graph.
+    raw_nodes = all_nodes(current, copy_nodes=False)
     eligible = {n['key'] for n in filter_nodes(raw_nodes, current['settings'], validated=True)}
     subscriptions = []
     for sub in current['subscriptions']:
