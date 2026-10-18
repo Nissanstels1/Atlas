@@ -291,3 +291,9 @@
 .atlas .at-monitor-panel[open]>summary{border-bottom:1px solid var(--at-line)}
 .atlas .at-monitor-panel>.at-padded{padding:8px}
 .atlas .at-monitor-panel .at-flow-list,.atlas .at-monitor-panel .at-rule-list{margin-top:0}
+
+.atlas .at-profile-rows .at-profile-usage{font-size:11px;line-height:1.35;color:#c6e8df;margin-top:4px}
+.atlas .at-profile-help{font-size:12px;margin:0}
+.atlas .at-profile-help>summary{cursor:pointer;width:fit-content;color:var(--at-accent);font-size:12px}
+.atlas .at-profile-help[open]{padding:8px 10px;border:1px solid var(--at-line);border-radius:7px}
+.atlas .at-profile-help p{margin:6px 0 0;font-size:12px;line-height:1.4}
