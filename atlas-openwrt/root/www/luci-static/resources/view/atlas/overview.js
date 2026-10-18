@@ -46,7 +46,12 @@ function atlasElement(tag, attrs, children) {
     return E(tag, attributes, flattened);
 }
 function node(tag, cls, children, attrs) {
+    if(tag==='textarea')cls=(cls || '')+' at-auto-grow';
     var element=atlasElement(tag, Object.assign({ 'class': cls || '' }, attrs || {}), children);
+    if(tag==='textarea'){
+        element.addEventListener('input',function(){atlasResizeTextArea(element);});
+        if(typeof requestAnimationFrame==='function')requestAnimationFrame(function(){atlasResizeTextArea(element);});
+    }
     if(tag==='table' && cls==='at-table') {
         var headings=Array.from(element.querySelectorAll('thead th')).map(function(x){return x.textContent;});
         Array.from(element.querySelectorAll('tbody tr')).forEach(function(row){Array.from(row.children).forEach(function(cell,i){cell.setAttribute('data-label',headings[i] || '');});});
@@ -60,6 +65,17 @@ function node(tag, cls, children, attrs) {
         return atlasElement('div',{'class':'at-checkbox-field'},[element,help]);
     }
     return element;
+}
+function atlasResizeTextArea(element){
+    if(!element.isConnected || !element.style)return;
+    element.style.height='auto';
+    element.style.height=(element.scrollHeight+2)+'px';
+}
+if(typeof window!=='undefined' && window.addEventListener)window.addEventListener('resize',function(){
+    document.querySelectorAll('.atlas textarea.at-auto-grow,.at-modal textarea.at-auto-grow').forEach(atlasResizeTextArea);
+});
+function atlasLinkInput(cls,value,placeholder){
+    return node('textarea','at-input at-link-input '+(cls || ''),label(value || ''),{rows:1,autocomplete:'off',autocapitalize:'off',spellcheck:'false',placeholder:placeholder || ''});
 }
 function atlasAdblockMatch(item,preset) {
     return item.policy==='dnsblock' && !item.section && !item.interface && (item.adblock_preset===preset.key || item.url===preset.url);
@@ -353,7 +369,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=profile-filter-20261017' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=compact-links-20261018' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -464,17 +480,17 @@ return view.extend({
     overviewPage: function() {
         var self = this, d = self.data, health = atlasProfileHealth(d);
         var selected = d.runtime && d.runtime.blocked ? (d.runtime.reason === 'no-main-pool' ? d.runtime.message : 'Заблокирован критериями выбора') : d.runtime && d.runtime.available && d.runtime.selected ? d.runtime.name : 'Выбор движка пока неизвестен';
+        var autostart=self.button('Автозапуск: '+(d.autostart ? 'включён' : 'выключен'),function(){return result(api.setAutostart(!d.autostart)).then(function(){return self.reload();});},'small at-autostart-toggle',self.busy());
+        autostart.setAttribute('aria-pressed',String(!!d.autostart));
+        autostart.setAttribute('title',d.autostart ? 'После перезагрузки Atlas запускается сам. Нажмите, чтобы выключить автозапуск.' : 'После перезагрузки Atlas сам не запускается. Нажмите, чтобы включить автозапуск.');
         return node('div', 'at-content', [
             node('section','at-wizard-start',[node('div','',[node('span','at-start-label',label('БЫСТРАЯ НАСТРОЙКА')),node('h2','',label('Добавить секцию')),node('p','',label('Подписка или профиль → секция → её домены и списки.'))]),self.button('Настроить по вопросам',function(){self.setupWizard();},'primary at-wizard-launch',self.busy())]),
-            node('section', 'at-hero', [
+            node('section', 'at-hero at-service-summary', [
                 node('div', 'at-hero-copy', [node('h2', '', label(d.running && d.startup && ['restoring-dns','starting','waiting-clock','connecting-dns'].indexOf(d.startup.stage)>=0 ? 'Atlas запускается' : d.running ? 'Atlas запущен' : 'Atlas остановлен')),
-                    node('p', '', label('Подключения → группы сайтов → проверка и применение. Мастер проведёт настройку по шагам.')),
                     node('div', 'at-actions', [self.button(d.running ? 'Применить изменения' : 'Запустить Atlas', function() { return self.action(d.running ? 'apply' : 'start'); }, 'primary', self.busy() || (!d.nodes.length && !(d.settings.remote_lists || []).some(function(x){return x.enabled !== false;}) && !(d.settings.sections || []).some(function(x) { return x.enabled !== false && (x.outbound_config_set || x.policy !== 'proxy'); }))),
-                        d.running ? self.button('Остановить', function() { return self.action('stop'); }, 'ghost', self.busy()) : self.button('Добавить подписку', function() { self.subscriptionDialog(); }, 'ghost', self.busy())])]),
-                node('div', 'at-orbit', [node('div', 'at-orbit-ring r1'), node('div', 'at-orbit-ring r2'), node('div', 'at-orbit-dot d1'), node('div', 'at-orbit-dot d2'), node('div', 'at-orbit-center', label('a'))], { 'aria-hidden': 'true' })
+                        d.running ? self.button('Остановить', function() { return self.action('stop'); }, 'ghost', self.busy()) : self.button('Добавить подписку', function() { self.subscriptionDialog(); }, 'ghost', self.busy()),autostart])])
             ]),
-            node('section','at-card at-padded',[node('h3','',label('Секции и их подключение')),self.button('Открыть секции',function(){self.navigate('routing');},'',self.busy())]),
-            node('section','at-card at-padded',[node('h3','',label('Автозапуск')),node('p','at-footnote',label(d.autostart ? 'Atlas включён для запуска после загрузки роутера.' : 'Автозапуск Atlas выключен.')),self.button(d.autostart ? 'Выключить автозапуск' : 'Включить автозапуск',function(){return result(api.setAutostart(!d.autostart)).then(function(){return self.reload();});},'ghost',self.busy()),node('p','at-footnote',label('Эта кнопка не запускает и не останавливает работающую службу. «Запустить Atlas» включает автозапуск; «Остановить» выключает его.'))]),
+            node('section','at-card at-padded at-section-shortcut',[node('h3','',label('Секции')),self.button('Открыть секции',function(){self.navigate('routing');},'small',self.busy())]),
             node('div', 'at-stats', [
                 self.stat('СОСТОЯНИЕ', d.runtime && d.runtime.blocked ? 'Пул заблокирован' : d.running ? 'Запущен' : 'Остановлен', d.running ? 'Процесс sing-box работает' : 'Трафик не перенаправляется', d.running ? 'green' : ''),
                 self.stat('ПОДПИСКИ', String(d.subscriptions.length).padStart(2, '0'), d.subscriptions.filter(function(s) { return s.enabled; }).length + ' включено'),
@@ -483,7 +499,7 @@ return view.extend({
             ]),
             node('div', 'at-grid-2', [
                 node('section', 'at-card', [self.sectionHead('Ваши подписки', 'Источники серверов', self.button('+ Добавить', function() { self.subscriptionDialog(); }, 'small', self.busy())),
-                    d.subscriptions.length ? node('div', 'at-sub-list', d.subscriptions.slice(0, 3).map(function(s) { return self.subscriptionRow(s); })) : self.empty('Начните с подписки', 'Добавьте ссылку провайдера и нажмите «Обновить».', function() { self.subscriptionDialog(); }, 'Добавить подписку')]),
+                    d.subscriptions.length ? node('div', 'at-sub-list at-subscription-scroll', d.subscriptions.map(function(s) { return self.subscriptionRow(s); }),{tabindex:0,role:'region','aria-label':'Все подписки — прокручиваемый список'}) : self.empty('Начните с подписки', 'Добавьте ссылку провайдера и нажмите «Обновить».', function() { self.subscriptionDialog(); }, 'Добавить подписку')]),
                 node('section', 'at-card', [self.sectionHead('Путь трафика', 'Текущие настройки'),
                     node('div', 'at-route-visual', [node('div', 'at-route-step', [node('span', 'at-route-icon', label('⌂')), node('div', '', [node('strong', '', label('Ваша сеть')), node('small', '', label('Устройства за роутером'))])]),
                         node('div', 'at-route-line'), node('div', 'at-route-step', [node('span', 'at-route-icon purple', label('a')), node('div', '', [node('strong', '', label('Atlas')), node('small', '', label(d.settings.mode === 'rules' ? 'Проверка доменов и IP' : 'Все внешние назначения'))])]),
@@ -520,13 +536,14 @@ return view.extend({
     subscriptionDialog: function(sub) {
         var self = this; sub = sub || {};
         var name = node('input', 'at-input', [], { value: sub.name || '', placeholder: 'Например, основная подписка', maxlength: 80 });
-        var url = node('input', 'at-input', [], { type: 'password', autocomplete: 'new-password', placeholder: sub.id ? 'Оставьте пустым, чтобы сохранить ссылку' : 'https://… или happ://crypt5/…' });
+        var url = atlasLinkInput('at-subscription-url','',sub.id ? 'Оставьте пустым, чтобы сохранить ссылку' : 'https://… или happ://crypt5/…');
         var headers = node('textarea', 'at-input at-textarea', [], { rows: 4, autocomplete: 'off', spellcheck: 'false', placeholder: 'Authorization: Bearer …\nUser-Agent: …' });
         var clearHeaders = node('input', '', [], { type: 'checkbox' });
         var enabled = node('input', '', [], { type: 'checkbox', checked: sub.enabled !== false });
         var msg = node('p', 'at-inline-error');
-        ui.showModal(sub.id ? 'Изменить подписку' : 'Новая подписка', [node('div', 'at-modal', [self.field('Название', name), self.field('Ссылка подписки', url), self.field('HTTP-заголовки провайдера', headers), sub.headers_set ? node('p', 'at-footnote', label('Заголовки уже сохранены и скрыты. Пустое поле сохраняет их; новые строки заменят их.')) : label(''), node('label', 'at-checkbox', [clearHeaders, label('Удалить сохранённые заголовки')]), node('label', 'at-checkbox', [enabled, label('Использовать подписку')]), msg,
-            node('p', 'at-footnote', label('Заголовки хранятся только на роутере с настройками Atlas. Перенаправление на другой сервер запрещено, чтобы не переслать токен. После сохранения нажмите «Обновить».'))]), node('div', 'right', [atlasElement('button', { 'class': 'btn', click: ui.hideModal }, 'Отмена'), self.button('Сохранить', function() {
+        var advanced=atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Дополнительно: заголовки провайдера'),self.field('HTTP-заголовки провайдера',headers),sub.headers_set ? node('p','at-footnote',label('Пустое поле сохраняет прежние заголовки; новые строки заменяют их.')) : label(''),node('label','at-checkbox',[clearHeaders,label('Удалить сохранённые заголовки')])]);
+        ui.showModal(sub.id ? 'Изменить подписку' : 'Новая подписка', [node('div', 'at-modal', [self.field('Название', name), self.field('Ссылка подписки', url), node('label', 'at-checkbox', [enabled, label('Использовать подписку')]),advanced,msg,
+            node('p', 'at-footnote', label('После сохранения нажмите «Обновить», чтобы загрузить профили.'))]), node('div', 'right', [atlasElement('button', { 'class': 'btn', click: ui.hideModal }, 'Отмена'), self.button('Сохранить', function() {
                 return result(api.saveSubscription(sub.id || '', name.value, url.value, enabled.checked, headers.value, clearHeaders.checked)).then(function() { ui.hideModal(); return self.reload(); }).catch(function(e) { msg.textContent = e.message; });
             }, 'primary')])]);
     },
@@ -636,7 +653,7 @@ return view.extend({
         var maxPing = node('input', 'at-input', [], { type: 'number', min: 0, max: 60000, value: s.max_ping_ms || 0 });
         var strategy = node('select', 'at-input', [atlasElement('option', { value: 'fastest', selected: (s.auto_strategy || 'fastest') === 'fastest' }, 'Минимальный пинг'), atlasElement('option', { value: 'slowest', selected: s.auto_strategy === 'slowest' }, 'Максимальный пинг'), atlasElement('option', { value: 'stable', selected: s.auto_strategy === 'stable' }, 'Наиболее стабильный пинг')]);
         var extensions = self.urltestExtensions(s);
-        var testUrl = node('input', 'at-input', [], { value: s.urltest_url || 'https://www.gstatic.com/generate_204', placeholder: 'https://www.gstatic.com/generate_204' });
+        var testUrl = atlasLinkInput('',s.urltest_url || 'https://www.gstatic.com/generate_204','https://www.gstatic.com/generate_204');
         var interrupt = node('input', '', [], { type: 'checkbox', checked: !!s.interrupt_connections });
         var msg = node('p', 'at-inline-error');
         ui.showModal('Общие фильтры и проверка профилей', [node('div', 'at-modal', [
@@ -681,7 +698,7 @@ return view.extend({
         redraw();
         var mode=node('select','at-input at-download-mode',[atlasElement('option',{value:'default'},'Настройка движка'),atlasElement('option',{value:'off',disabled:features.indexOf('urltest.download_url')<0},'Выключено'),atlasElement('option',{value:'custom',disabled:features.indexOf('urltest.download_url')<0},'Свой адрес')]);
         mode.value=settings.urltest_download_check || 'default';
-        var url=node('input','at-input at-download-url',[],{value:settings.urltest_download_url || '',placeholder:'https://example.com/test.bin'});
+        var url=atlasLinkInput('at-download-url',settings.urltest_download_url || '','https://example.com/test.bin');
         var element=atlasElement('details',{},[atlasElement('summary',{},'Резервные серверы и проверка скачивания'),node('p','at-footnote',label('Резерв используется по порядку, когда нет основного сервера, подходящего по свежим замерам и вашим критериям. После восстановления группа возвращается к основным. Резервные серверы совместимы с приоритетом стран и порогами пинга. Проверка скачивания совместно с критериями Atlas требует Atlas Engine r3; перед переключением проверяется передача 64 КиБ через выбранный сервер. Для расширений нужен Atlas Engine.')),list,self.button('Добавить резервный сервер',function(){var available=(self.data.nodes || []).find(function(n){return reserves.indexOf(n.key)<0;});if(available){reserves.push(available.key);redraw();}},'ghost',features.indexOf('urltest.fallbacks')<0),self.field('Проверка скачивания 64 КиБ перед переключением',mode),self.field('Адрес файла для проверки',url),node('p','at-footnote',label('Расширения установленного движка: '+(features.join(', ') || 'не обнаружены')+'. Штатный sing-box сохраняет прежнее поведение. Сохранённые неподдерживаемые настройки требуют совместимого движка или очистки.'))]);
         return {element:element,values:function(){return {urltest_fallbacks:reserves.slice(),urltest_download_check:mode.value,urltest_download_url:mode.value==='custom' ? url.value.trim() : ''};}};
     },
@@ -708,7 +725,7 @@ return view.extend({
     siteCheckFields: function(section) {
         var self=this, rows=(section.site_checks || []).map(function(c){return Object.assign({},c);}), holder=node('div','at-site-checks');
         function redraw(){holder.replaceChildren.apply(holder,rows.map(function(c,index){
-            var url=node('input','at-input at-site-url',[],{value:c.url || '',placeholder:'https://www.youtube.com/',type:'url'});
+            var url=atlasLinkInput('at-site-url',c.url || '','https://www.youtube.com/');
             var statuses=node('input','at-input at-site-statuses',[],{value:(c.statuses || [200]).join(', '),placeholder:'200'});
             var marker=node('input','at-input at-site-marker',[],{value:c.contains || '',placeholder:'Необязательно: название сайта на странице'});
             url.addEventListener('input',function(){c.url=url.value;});statuses.addEventListener('input',function(){c.statuses=lines(statuses.value).map(Number);});marker.addEventListener('input',function(){c.contains=marker.value;});
@@ -770,7 +787,7 @@ return view.extend({
         function draw(){
             var name=node('input','at-input at-library-name',[],{value:title,placeholder:'Например, Мои видео'});name.addEventListener('input',function(){title=name.value;});
             var kind=node('select','at-input at-library-kind',[atlasElement('option',{value:'url',selected:mode==='url'},'Ссылка на файл или файл роутера'),atlasElement('option',{value:'text',selected:mode==='text'},'Ввести домены или IP вручную')]);kind.addEventListener('change',function(){mode=kind.value;draw();});
-            var address=node('input','at-input at-library-url',[],{value:url,placeholder:'https://example.org/domains.txt или file:///etc/atlas/list.txt'});address.addEventListener('input',function(){url=address.value;});
+            var address=atlasLinkInput('at-library-url',url,'https://example.org/domains.txt или file:///etc/atlas/list.txt');address.addEventListener('input',function(){url=address.value;});
             var text=node('textarea','at-input at-library-content',label(content),{rows:5,placeholder:'example.org\nexample.net',spellcheck:'false'});text.addEventListener('input',function(){content=text.value;});
             var formats=mode==='text' ? ['auto','domains','cidrs'] : ['auto','domains','cidrs','hosts','adguard','json','srs'];if(formats.indexOf(format)<0)format='auto';
             var select=node('select','at-input at-library-format',formats.map(function(f){return atlasElement('option',{value:f,selected:format===f},{auto:'Определить автоматически',domains:'Домены',cidrs:'IP и подсети',hosts:'Файл hosts',adguard:'Доменные правила AdGuard',json:'Правила sing-box JSON',srs:'Готовый список sing-box SRS'}[f]);}));select.addEventListener('change',function(){format=select.value;});
@@ -798,7 +815,7 @@ return view.extend({
             if(step===1){if(!draft.name.trim())throw new Error('Введите название секции');if((self.data.settings.sections || []).some(function(x){return x.name.toLowerCase()===draft.name.trim().toLowerCase();}))throw new Error('Такое название секции уже используется');if(draft.policy==='proxy' && draft.source==='none')throw new Error('Выберите подписку или профиль на первом шаге');if(draft.policy==='proxy' && !candidates().length)throw new Error('Нет подходящих профилей. Проверьте подключение и общие фильтры.');if(draft.policy==='proxy' && draft.selection==='manual' && !draft.profile)throw new Error('Выберите профиль');}
             if(step===2){if(!lines(draft.domains).length && !lines(draft.devices).length && !draft.community.length && !draft.library.length && !['localDomains','localCidrs','remoteDomains','remoteCidrs'].some(function(k){return lines(draft[k]).length;}))throw new Error('Добавьте домены, список или IP устройства');['localDomains','localCidrs'].forEach(function(k){if(lines(draft[k]).some(function(x){return !/^\//.test(x) && !/^file:\/\//.test(x);}))throw new Error('Локальный список: укажите полный путь, например /etc/atlas/domains.txt');});['remoteDomains','remoteCidrs'].forEach(function(k){if(lines(draft[k]).some(function(x){return !/^https?:\/\//.test(x);}))throw new Error('Внешний список: укажите ссылку http:// или https://');});}}
         function provision(){if(draft.source!=='new')return Promise.resolve();var text=draft.sourceText.trim(),promise;
-            if(/^https?:\/\/\S+$/.test(text)){var known=(self.data.subscriptions || []).map(function(x){return x.id;});promise=result(api.saveSubscription(sourceId,draft.sourceName.trim(),text,true,'',false)).then(function(){return self.requestStatus(true);}).then(function(d){self.data=d;if(!sourceId){var created=d.subscriptions.find(function(x){return known.indexOf(x.id)<0 && x.name===draft.sourceName.trim();});if(!created)throw new Error('Не найден добавленный источник');sourceId=created.id;}return result(api.action('refresh',sourceId));}).then(function(){return self.wizardWait();});}
+            if(/^(?:https?:\/\/|happ:\/\/crypt5\/)\S+$/.test(text)){var known=(self.data.subscriptions || []).map(function(x){return x.id;});promise=result(api.saveSubscription(sourceId,draft.sourceName.trim(),text,true,'',false)).then(function(){return self.requestStatus(true);}).then(function(d){self.data=d;if(!sourceId){var created=d.subscriptions.find(function(x){return known.indexOf(x.id)<0 && x.name===draft.sourceName.trim();});if(!created)throw new Error('Не найден добавленный источник');sourceId=created.id;}return result(api.action('refresh',sourceId));}).then(function(){return self.wizardWait();});}
             else promise=result(api.importProfiles(draft.sourceName.trim(),text,sourceId)).then(function(r){sourceId=r.id;return self.requestStatus(true);}).then(function(d){self.data=d;});return promise.then(function(){if(!sourceId)throw new Error('Источник не найден после добавления');});}
         function draw(){message=node('p','at-inline-error');var body=[],title=['Подписка или профиль','Секция и серверы','Домены и списки секции','Сохранить секцию'][step];
             if(step===0){var source=select('source',[['all','Все сохранённые профили'],['multiple','Выбрать сохранённые подписки'],['new','Добавить подписку или профиль'],['none','Без прокси — напрямую или блокировать']]);source.addEventListener('change',draw);body.push(self.field('Источник профилей',source));if(draft.source==='multiple')body.push(node('div','at-wizard-sources',subscriptions().map(function(x){var on=node('input','',[],{type:'checkbox',checked:draft.sources.indexOf(x.id)>=0});on.addEventListener('change',function(){draft.sources=draft.sources.filter(function(id){return id!==x.id;});if(on.checked)draft.sources.push(x.id);});return node('label','at-checkbox',[on,label(x.name+' · '+x.count+' профилей')]);})));if(draft.source==='new')body.push(self.field('Название источника',input('sourceName','Моя подписка')),self.field('Ссылка подписки или профиль',input('sourceText','https://… или vless://…',true),'Можно вставить подписку, один профиль или несколько ссылок профилей — по одной на строку.'));body.push(node('p','at-footnote',label('Подписка — источник профилей. На следующем шаге выберите автовыбор или один сервер. Действуют общие фильтры профилей.')));}
@@ -899,7 +916,7 @@ return view.extend({
             var autoTolerance = node('input','at-input at-section-auto-tolerance',[],{type:'number',min:1,max:2000,value:original.auto_tolerance_ms == null ? '' : original.auto_tolerance_ms,placeholder:'Наследовать'});
             var extensions = self.urltestExtensions(original);
             var sites = self.siteCheckFields(original);
-            var autoUrl = node('input','at-input at-section-auto-url',[],{value:original.urltest_url || '',placeholder:'Наследовать общий HTTPS URL'});
+            var autoUrl = atlasLinkInput('at-section-auto-url',original.urltest_url || '','Наследовать общий HTTPS URL');
             var sectionUot = node('select','at-input at-section-uot',[atlasElement('option',{value:'inherit',selected:original.udp_over_tcp == null},'Наследовать общую настройку'),atlasElement('option',{value:'on',selected:original.udp_over_tcp === true},'Включить'),atlasElement('option',{value:'off',selected:original.udp_over_tcp === false},'Выключить')]);
             var sectionUotVersion = node('select','at-input at-section-uot-version',[atlasElement('option',{value:'inherit',selected:original.udp_over_tcp_version == null},'Наследовать общую версию'),atlasElement('option',{value:'1',selected:original.udp_over_tcp_version === 1},'1'),atlasElement('option',{value:'2',selected:original.udp_over_tcp_version === 2},'2')]);
             var fields = {};
@@ -915,7 +932,7 @@ return view.extend({
             var listHolder=node('div','at-section-sources');
             function renderSources(){listHolder.replaceChildren.apply(listHolder,listRows.map(function(item,index){
                 var title=node('input','at-input',[],{value:item.name || '',placeholder:'Название списка'});
-                var url=node('input','at-input',[],{value:item.url || '',placeholder:item.format==='cidrs' ? 'https://example.org/ip.txt' : 'https://example.org/domains.txt'});
+                var url=atlasLinkInput('',item.url || '',item.format==='cidrs' ? 'https://example.org/ip.txt' : 'https://example.org/domains.txt');
                 var inlineSource=!!item.source_catalogue_id && (self.data.settings.list_catalogue || []).some(function(t){return t.id===item.source_catalogue_id && (t.content || t.content_set);});
                 var format=node('select','at-input',['auto','domains','cidrs','srs','json','hosts','adguard'].map(function(f){return atlasElement('option',{value:f,selected:f===(item.format || 'auto')},{auto:'Определить автоматически',domains:'Домены — текстовый файл',cidrs:'IP и подсети — текстовый файл',srs:'Готовый список sing-box (.srs)',json:'Правила sing-box (.json)',hosts:'Файл hosts',adguard:'Доменные фильтры AdGuard'}[f]);}));
                 var on=node('input','',[],{type:'checkbox',checked:item.enabled!==false});
