@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=luci-app-atlas
 PKG_VERSION:=0.29.0
 PKG_RELEASE:=1
-PKG_LICENSE:=MIT
+PKG_LICENSE:=MIT MPL-2.0
 PKGARCH:=all
 
 include $(INCLUDE_DIR)/package.mk
