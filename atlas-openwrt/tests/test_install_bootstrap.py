@@ -20,6 +20,15 @@ def shell_path(path):
 
 @unittest.skipUnless(SHELL, 'POSIX shell is required')
 class BootstrapTests(unittest.TestCase):
+    def test_entrypoints_match_when_root_is_present(self):
+        entry = ROOT.parent / 'install.sh'
+        if entry.is_file():
+            self.assertEqual((ROOT / 'install.sh').read_bytes(), entry.read_bytes())
+
+    def test_bundled_bootstrap_matches_current_overlay(self):
+        digest = hashlib.sha256((ROOT / 'tools/repair-nanopi-audit.sh').read_bytes()).hexdigest()
+        self.assertIn(digest, (ROOT / 'install.sh').read_text())
+
     def run_fixture(self, manager, failure=''):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
