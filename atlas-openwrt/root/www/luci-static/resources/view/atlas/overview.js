@@ -22,6 +22,7 @@ var api = {
     sectionDashboard: rpc.declare({ object: 'atlas', method: 'section_dashboard', expect: {} }),
     sectionSelect: rpc.declare({ object: 'atlas', method: 'section_select', params: ['id','group','member'], expect: {} }),
     monitor: rpc.declare({ object: 'atlas', method: 'monitor', expect: {} }),
+    connectionRule: rpc.declare({object:'atlas',method:'connection_rule',params:['operation','section','id','target'],expect:{}}),
     configPreview: rpc.declare({object:'atlas',method:'config_preview',params:['validate'],expect:{}}),
     routeExplain: rpc.declare({object:'atlas',method:'route_explain',params:['query'],expect:{}}),
     sectionClone: rpc.declare({object:'atlas',method:'section_clone',params:['id','name'],expect:{}}),
@@ -151,6 +152,16 @@ function atlasSectionConnection(section,data,staged) {
     if(Array.isArray(section.pools))source=section.pools.length ? 'Подписок: '+section.pools.length : 'Все подписки';
     else if(section.pool){var subscription=(data.subscriptions || []).find(function(s){return s.id===section.pool;});source=subscription ? subscription.name : 'Подписка недоступна';}
     return (choice==='auto' ? 'Автовыбор' : 'Закреплён: '+(profile ? profile.name : 'сохранённый профиль'))+' · '+source;
+}
+
+function atlasConnectionRules(data) {
+    var result=[];
+    ((data.settings || {}).sections || []).forEach(function(section){(section.connection_rules || []).forEach(function(rule){result.push({section:section,rule:rule});});});
+    return result;
+}
+function atlasConnectionRuleMatches(rule,connection) {
+    var host=String(connection.host || '').toLowerCase(),ip=String(connection.destination || '').toLowerCase();
+    return (rule.domains || []).some(function(d){return host===d || host.endsWith('.'+d);}) || (rule.cidrs || []).some(function(c){return c.replace(/\/(32|128)$/,'').toLowerCase()===ip;});
 }
 
 function label(t) { return document.createTextNode(String(t)); }
@@ -390,7 +401,7 @@ return view.extend({
                 if (self.tab !== 'routing' && self.tab !== 'settings') self.draw();
             });
         }, 4);
-        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=profile-sections-20261018' }), this.root]);
+        return node('div', '', [atlasElement('link', { rel: 'stylesheet', href: L.resource('atlas/atlas.css') + '?v=monitor-rules-20261024' }), this.root]);
     },
     busy: function() { return this.offline || ['queued', 'running'].indexOf((this.data.job || {}).status) >= 0; },
     button: function(title, callback, kind, disabled) {
@@ -773,6 +784,7 @@ return view.extend({
             var text=child.textContent || '',cls=child.getAttribute ? child.getAttribute('class') || '' : child.attributes && child.attributes.class || '';
             if(cls.indexOf('at-inline-error')>=0)errors.push(child);
             else if(cls.indexOf('at-section-sources-editor')>=0)sources.push(child);
+            else if(cls.indexOf('at-section-connection-rules')>=0)targets.push(child);
             else if(cls.indexOf('at-site-editor')>=0 || text.indexOf('Автопроверка серверов этой секции')===0)checks.push(child);
             else if(text.indexOf('Исключения только из этой секции')===0)exceptions.push(child);
             else if(cls.indexOf('at-grid-2')>=0 && text.indexOf('Домены')===0){var primary=[],extra=[];Array.from(child.children).forEach(function(field,index){(index<3 ? primary : extra).push(field);});targets.push(node('div','at-grid-2',primary));extras.push(node('div','at-grid-2',extra));}
@@ -947,7 +959,7 @@ return view.extend({
             var pool=node('select','at-input at-section-pool',[
                 atlasElement('option',{value:'all',selected:(!Array.isArray(original.pools) && !original.pool) || (Array.isArray(original.pools) && !original.pools.length)},'Все включённые подписки'),
                 atlasElement('option',{value:'multiple',selected:Array.isArray(original.pools) && !!original.pools.length},'Несколько выбранных подписок')
-            ].concat((self.data.subscriptions || []).filter(function(x){return x.enabled;}).map(function(x){return atlasElement('option',{value:x.id,selected:original.pool===x.id},x.name);}))); 
+            ].concat((self.data.subscriptions || []).filter(function(x){return x.enabled;}).map(function(x){return atlasElement('option',{value:x.id,selected:original.pool===x.id},x.name);})));
             var poolChecks=(self.data.subscriptions || []).filter(function(x){return x.enabled;}).map(function(x){return {id:x.id,input:node('input','',[],{type:'checkbox',checked:(original.pools || []).indexOf(x.id)>=0}),name:x.name};});
             var poolChoices=node('div','at-pool-choices',poolChecks.map(function(x){return node('label','at-checkbox',[x.input,label(x.name)]);}));
             function poolVisibility(){poolChoices.hidden=policy.value!=='proxy' || pool.value!=='multiple';}pool.addEventListener('change',poolVisibility);poolVisibility();
@@ -967,6 +979,7 @@ return view.extend({
             var autoUrl = atlasLinkInput('at-section-auto-url',original.urltest_url || '','Наследовать общий HTTPS URL');
             var sectionUot = node('select','at-input at-section-uot',[atlasElement('option',{value:'inherit',selected:original.udp_over_tcp == null},'Наследовать общую настройку'),atlasElement('option',{value:'on',selected:original.udp_over_tcp === true},'Включить'),atlasElement('option',{value:'off',selected:original.udp_over_tcp === false},'Выключить')]);
             var sectionUotVersion = node('select','at-input at-section-uot-version',[atlasElement('option',{value:'inherit',selected:original.udp_over_tcp_version == null},'Наследовать общую версию'),atlasElement('option',{value:'1',selected:original.udp_over_tcp_version === 1},'1'),atlasElement('option',{value:'2',selected:original.udp_over_tcp_version === 2},'2')]);
+            var ownedRules=self.connectionRulesFields(original.connection_rules || []);
             var fields = {};
             ['domains','cidrs','source_ips','routed_source_ips','source_interfaces','ports','networks','exclude_domains','exclude_cidrs','exclude_source_ips'].forEach(function(k) { fields[k] = node('textarea', 'at-input at-textarea at-section-' + k, label((original[k] || []).join('\n')), { rows: 3, spellcheck: 'false' }); });
             var json = node('textarea', 'at-input at-textarea at-section-json', label(JSON.stringify(config || [], null, 2)), { rows: 12, spellcheck: 'false', autocomplete: 'off' });
@@ -1009,6 +1022,7 @@ return view.extend({
                 atlasElement('details',{},[atlasElement('summary',{},'UDP через TCP для этой секции'),self.field('UDP-over-TCP',sectionUot),self.field('Версия',sectionUotVersion),node('p','at-footnote',label('Для SOCKS и Shadowsocks обычного пула. Сервер должен поддерживать выбранную версию. Секция получает отдельные копии выходов; соседние секции сохраняют свои настройки. В экспертном JSON параметр задаётся в самом outbound.'))]),
                 atlasElement('details',{},[atlasElement('summary',{},'Автопроверка серверов этой секции'),self.field('Интервал, секунд',autoInterval),self.field('Допустимая разница задержки, мс',autoTolerance),self.field('HTTPS URL проверки',autoUrl),node('p','at-footnote',label('Пустые поля наследуют общие значения. Для обычного прокси-пула заполненные поля создают независимый selector и URLTest. В экспертном JSON параметры URLTest задаются самим JSON.'))]),
                 atlasElement('details',{},[atlasElement('summary',{},'Исключения только из этой секции'),node('div','at-grid-2',[self.field('Исключить домены',fields.exclude_domains),self.field('Исключить IP назначения / CIDR',fields.exclude_cidrs),self.field('Исключить устройства / CIDR',fields.exclude_source_ips)]),node('p','at-footnote',label('Исключённый трафик проверяется следующими правилами. Это не глобальный прямой маршрут. IP назначения проверяется по известному движку адресу; для доменов с FakeIP используйте доменные исключения.'))]),
+                atlasElement('details',{'class':'at-section-connection-rules'},[atlasElement('summary',{},'Добавлено из соединений · '+(original.connection_rules || []).length),ownedRules.element]),
                 atlasElement('details', {}, [atlasElement('summary', {}, 'JSON outbound — расширенная конфигурация'), self.field('Объект, список или {"outbounds": […]}', json), node('p', 'at-footnote', label('Первый outbound — выход секции. Можно указать selector/urltest и связанные узлы с уникальными tag. Для связи с другой экспертной секцией используйте section_<ID секции>_<tag узла>. Несуществующие или выключенные выходы и циклы отвергаются при проверке конфигурации. Параметры протоколов проверяет установленный sing-box. Фильтры подписочного автовыбора к этому JSON не применяются. [] возвращает подписочный пул. Этот JSON может содержать пароли; доступен только администратору.'))]),
                 node('label', 'at-checkbox', [mixed, label('Отдельный HTTP/SOCKS-прокси этой секции')]), node('div', 'at-grid-2', [self.field('LAN или loopback IP', bind), self.field('Порт', port), self.field('Имя пользователя', username), self.field('Пароль', password)]),
                 node('p', 'at-footnote', label('Весь трафик этого HTTP/SOCKS-прокси использует выход секции. Порт должен быть уникальным. Изменения пока остаются в форме; затем сохраните правила и примените их.')), msg
@@ -1025,6 +1039,8 @@ return view.extend({
                     updated.auto_interval_seconds=autoInterval.value.trim() ? Number(autoInterval.value) : null;
                     updated.auto_tolerance_ms=autoTolerance.value.trim() ? Number(autoTolerance.value) : null;
                     updated.urltest_url=autoUrl.value.trim();
+                    updated.connection_rules=ownedRules.values();
+                    if(updated.connection_rules.length && policy.value!=='proxy')throw new Error('Сначала уберите правила из соединений или оставьте тип «Прокси».');
                     updated.site_checks=policy.value==='proxy' ? sites.values() : [];
                     Object.assign(updated,extensions.values());
                     delete updated.outbound_config_set;
@@ -1070,7 +1086,7 @@ return view.extend({
             sectionList.replaceChildren.apply(sectionList, sectionDraft.map(function(x, index) {
                 function move(delta) { var other = index + delta; if (other < 0 || other >= sectionDraft.length) return; var saved=sectionDraft[index];sectionDraft[index]=sectionDraft[other];sectionDraft[other]=saved;syncSections(); }
                 var connection=atlasSectionConnection(x,d,sectionSelections[x.id]);
-                return node('article', 'at-card at-padded at-section-summary', [node('strong', '', label(x.name)), node('p', 'at-footnote', label((x.enabled === false ? 'Выключена · ' : '') + ({proxy:'Прокси',direct:'Напрямую',exclude:'Исключение',block:'Блокировать',interface:'VPN'}[x.policy] || x.policy) + (connection ? ' · '+connection : '') + (x.mixed_proxy && x.mixed_proxy.enabled ? ' · HTTP/SOCKS ' + x.mixed_proxy.listen + ':' + x.mixed_proxy.port : ''))), node('p','at-footnote',label((x.domains || []).slice(0,4).join(', ')+(x.domains && x.domains.length>4 ? ' и ещё '+(x.domains.length-4) : '')+' · списков: '+sectionSources.get().filter(function(l){return l.section===x.id;}).length+' · '+(x.site_checks && x.site_checks.length ? 'Проверка сайтов: '+x.site_checks.length : x.policy==='proxy' ? 'HTTPS-проверка профилей' : 'Профиль не требуется'))),node('div','at-actions',[
+                return node('article', 'at-card at-padded at-section-summary', [node('strong', '', label(x.name)), node('p', 'at-footnote', label((x.enabled === false ? 'Выключена · ' : '') + ({proxy:'Прокси',direct:'Напрямую',exclude:'Исключение',block:'Блокировать',interface:'VPN'}[x.policy] || x.policy) + (connection ? ' · '+connection : '') + (x.mixed_proxy && x.mixed_proxy.enabled ? ' · HTTP/SOCKS ' + x.mixed_proxy.listen + ':' + x.mixed_proxy.port : ''))), node('p','at-footnote',label((x.domains || []).slice(0,4).join(', ')+(x.domains && x.domains.length>4 ? ' и ещё '+(x.domains.length-4) : '')+((x.connection_rules || []).length ? ' · из соединений: '+x.connection_rules.length : '')+' · списков: '+sectionSources.get().filter(function(l){return l.section===x.id;}).length+' · '+(x.site_checks && x.site_checks.length ? 'Проверка сайтов: '+x.site_checks.length : x.policy==='proxy' ? 'HTTPS-проверка профилей' : 'Профиль не требуется'))),node('div','at-actions',[
                     self.button('Настроить секцию', function() { return self.sectionDialog(x, function(value) { if(sectionDraft.some(function(y,i){return i!==index&&y.name.toLowerCase()===value.name.toLowerCase();})) throw new Error('Название секции уже используется');sectionDraft[index]=value;syncSections(); },sectionSources); }, '', self.busy()),
                     self.button('Копировать',function(){self.cloneSectionDialog(x);},'ghost',self.busy()||!x.id),
                     self.button('↑',function(){move(-1);},'ghost',index===0||self.busy()),self.button('↓',function(){move(1);},'ghost',index===sectionDraft.length-1||self.busy()),
@@ -1284,8 +1300,56 @@ return view.extend({
             node('section', 'at-card at-padded', [node('h3', '', label('Система')),atlasElement('details',{'class':'at-advanced'},[atlasElement('summary',{},'Запуск и восстановление'),self.startupCard()]), node('dl', 'at-details', [node('dt', '', label('Atlas')), node('dd', '', label(d.version + ' beta')), node('dt', '', label('Движок')), node('dd', '', label(d.engine || 'Не установлен')), node('dt', '', label('Применение')), node('dd', '', label(d.applied.at ? date(d.applied.at) : 'Не применялось')), node('dt', '', label('Watchdog')), node('dd', '', label(d.watchdog && d.watchdog.reason ? d.watchdog.reason + ' · ' + date(d.watchdog.at) : 'Ошибок восстановления нет')), node('dt', '', label('Конфигурация')), node('dd', '', label('sing-box check + ограниченный откат к последней рабочей конфигурации'))])]),
             node('p', 'at-footnote', label('Atlas управляет собственным экземпляром sing-box. Одновременная работа с Podkop, Passwall или OpenClash блокируется. Ссылка подписки не показывается в статусе или журнале Atlas.'))]);
     },
+    connectionRulesFields: function(original) {
+        var self=this,rows=JSON.parse(JSON.stringify(original || [])),container=node('div','at-owned-rule-fields');
+        function draw(){container.replaceChildren.apply(container,rows.length ? rows.map(function(row,index){
+            var title=node('input','at-input',[],{value:row.name,'aria-label':'Название правила из соединений'});
+            var domains=node('textarea','at-input',label((row.domains || []).join('\n')),{rows:2,'aria-label':'Домены правила из соединений'});
+            var ips=node('textarea','at-input',label((row.cidrs || []).join('\n')),{rows:2,'aria-label':'IP правила из соединений'});
+            title.addEventListener('input',function(){row.name=title.value;});domains.addEventListener('input',function(){row.domains=lines(domains.value);});ips.addEventListener('input',function(){row.cidrs=lines(ips.value);});
+            return node('div','at-owned-rule',[self.field('Название',title),node('div','at-grid-2',[self.field('Домены и поддомены',domains),self.field('Отдельные публичные IP',ips)]),self.button('Убрать правило',function(){rows.splice(index,1);draw();},'danger-link')]);
+        }) : [node('p','at-footnote',label('Добавляйте адреса кнопкой «В секцию» в мониторе соединений.'))]);}
+        draw();return {element:container,values:function(){return rows;}};
+    },
+    connectionRuleDialog: function(connection,existing,removing) {
+        var self=this,sections=(self.data.settings.sections || []).filter(function(s){return s.enabled && s.policy==='proxy';});
+        if(!sections.length && !removing){error(new Error('Сначала создайте включённую прокси-секцию.'));return Promise.resolve();}
+        var ready=existing ? Promise.resolve({domain:'',site:'',cidr:'',related:[]}) : result(api.connectionRule('preview','','',{host:connection.host || '',destination:connection.destination || '',related:(self.monitor.connections || []).filter(function(c){return connection.source && c.source===connection.source;}).map(function(c){return c.host || '';}).slice(0,50)}));
+        return ready.then(function(target){
+            var record=existing && existing.rule,identity=record ? record.id : '';
+            var section=node('select','at-input at-connection-section',sections.map(function(s){return atlasElement('option',{value:s.id,selected:existing ? existing.section.id===s.id : false},s.name);}));
+            var scope=node('select','at-input at-connection-domain-scope',target.domain ? [atlasElement('option',{value:target.site,selected:true},'Сайт и поддомены: '+target.site),target.site!==target.domain ? atlasElement('option',{value:target.domain},'Только этот домен: '+target.domain) : null] : []);
+            var useDomain=node('input','',[],{type:'checkbox',checked:!!target.domain});
+            var useIP=node('input','',[],{type:'checkbox',checked:!target.domain && !!target.cidr});
+            var domains=node('textarea','at-input at-connection-domains',label(record ? record.domains.join('\n') : target.site),{rows:2,'aria-label':'Домены правила'});
+            var ips=node('textarea','at-input at-connection-ips',label(record ? record.cidrs.join('\n') : (!target.domain ? target.cidr : '')),{rows:2,'aria-label':'IP правила'});
+            var title=node('input','at-input at-connection-name',[],{value:record ? record.name : target.site || target.cidr,maxlength:80});
+            var message=node('p','error');
+            scope.addEventListener('change',function(){domains.value=useDomain.checked ? scope.value : '';});
+            useDomain.addEventListener('change',function(){domains.value=useDomain.checked ? scope.value : '';});
+            useIP.addEventListener('change',function(){ips.value=useIP.checked ? target.cidr : '';});
+            var extra=node('div','at-connection-related',(target.related || []).map(function(d){var check=node('input','',[],{type:'checkbox'});check.addEventListener('change',function(){var values=lines(domains.value).filter(function(x){return x!==d;});if(check.checked)values.push(d);domains.value=values.join('\n');atlasResizeTextArea(domains);});return atlasElement('label',{'class':'at-checkbox'},[check,label(d)]);}));
+            function commit(){
+                var payload=removing ? {} : {name:title.value.trim(),domains:lines(domains.value),cidrs:lines(ips.value)};
+                if(!removing && !payload.domains.length && !payload.cidrs.length){message.textContent='Добавьте домен или IP.';return Promise.resolve();}
+                return result(api.connectionRule(removing ? 'delete' : 'save',section.value || '',identity,payload)).then(function(){ui.hideModal();return self.data.running ? self.action('apply') : self.reload();}).catch(function(e){if(message.isConnected)message.textContent=e.message;else error(e);});
+            }
+            ui.showModal(removing ? 'Убрать правило из секции' : record ? 'Изменить правило соединения' : 'Направить в прокси-секцию',[
+                node('div','at-modal at-connection-modal',removing ? [node('strong','',label(record.name)),node('p','at-footnote',label('Будут удалены домены и IP только этого правила. Введённые вручную адреса и другие списки сохранятся.'))] : [
+                    self.field('Секция',section),self.field('Название',title),
+                    !record && target.domain ? node('div','at-connection-suggestion',[atlasElement('label',{'class':'at-checkbox'},[useDomain,label('Добавить домен')]),scope]) : label(''),
+                    !record && target.cidr ? atlasElement('label',{'class':'at-checkbox'},[useIP,label('Добавить IP '+target.cidr+' — он может использоваться другими сайтами')]) : label(''),
+                    node('div','at-grid-2',[self.field('Домены и все их поддомены',domains),self.field('Публичные IP',ips)]),
+                    target.related.length ? atlasElement('details',{},[atlasElement('summary',{},'Другие сайты этого устройства'),node('p','at-footnote',label('Это могут быть другие приложения. Выбирайте только нужные адреса.')),extra]) : label(''),
+                    node('p','at-footnote',label('Это явное назначение сайта для всех устройств, с приоритетом перед обычными секциями. Глобальные исключения сохраняют приоритет.'))
+                ]),
+                node('p','at-footnote',label(self.data.running ? 'Применение перезапустит Atlas. Затем откройте сайт заново.' : 'Правило сохранится; начнёт работать после запуска Atlas.')),message,
+                node('div','right',[self.button('Отмена',function(){ui.hideModal();},'ghost'),self.button((removing ? 'Убрать' : 'Сохранить')+(self.data.running ? ' и применить' : ''),commit,removing ? 'danger' : 'primary',self.busy())])
+            ]);
+        });
+    },
     monitorPage: function() {
-        var self = this, m = self.monitor || {}, connections = m.connections || [], rules = m.rules || [], resources = m.resources || {}, cache = resources.cache || {}, system = resources.system || {};
+        var self = this, m = self.monitor || {}, connections = m.connections || [], rules = m.rules || [], owned=atlasConnectionRules(self.data), resources = m.resources || {}, cache = resources.cache || {}, system = resources.system || {};
         return node('div', 'at-content', [
             self.sectionHead('Монитор соединений', 'Снимок локального API sing-box. Данные доступны только администраторам LuCI и не отправляются наружу.',
                 self.button('Обновить', function() { return self.requestMonitor().then(function(data) { self.monitor = data; self.draw(); }); }, 'small', self.busy())),
@@ -1306,15 +1370,18 @@ return view.extend({
             atlasElement('details', {'class':'at-card at-monitor-panel'}, [atlasElement('summary',{'aria-label':'Активные соединения'},[label('Активные соединения'),pill(String(connections.length),'neutral')]),node('div','at-padded',[
                 connections.length ? node('div', 'at-flow-list', connections.map(function(c) {
                     var target=c.host || c.destination || 'неизвестный адрес';
+                    var existing=owned.filter(function(x){return atlasConnectionRuleMatches(x.rule,c);}).sort(function(a,b){return Math.max.apply(null,b.rule.domains.map(function(d){return d.split('.').length;}).concat([0]))-Math.max.apply(null,a.rule.domains.map(function(d){return d.split('.').length;}).concat([0]));})[0];
                     var rule=c.rule ? c.rule + (c.rule_payload ? ' · '+c.rule_payload : '') : 'Правило не указано';
                     return node('article', 'at-flow', [
                         node('strong', 'at-flow-target', label(target), {title:target+' · '+rule}),
                         node('div', 'at-flow-origin', [node('span','at-flow-protocol',label((c.network || '—').toUpperCase())),node('span','',label(c.source || '—'),{'title':'Источник подключения'})]),
                         node('div', 'at-flow-route', label('→ '+atlasRouteChain(c.chains,self.data)), {'title':'Маршрут подключения'}),
-                        node('div', 'at-flow-traffic', label('↑ '+bytes(c.upload)+' · ↓ '+bytes(c.download)), {'title':'Отправлено · получено'})
+                        node('div', 'at-flow-traffic', label('↑ '+bytes(c.upload)+' · ↓ '+bytes(c.download)), {'title':'Отправлено · получено'}),
+                        node('div','at-flow-actions',[self.button(existing ? 'Правило' : 'В секцию',function(){return self.connectionRuleDialog(c,existing);},'small',self.busy()),existing ? atlasElement('button',{'class':'at-btn small danger-link','aria-label':'Убрать правило '+existing.rule.name,disabled:self.busy() || self.readonly,click:function(){return self.connectionRuleDialog(c,existing,true).catch(error);}},'×') : label('')])
                     ], {'aria-label':'Соединение: '+target});
                 })) : node('p', 'at-footnote', label(m.available ? 'Активных соединений сейчас нет.' : 'Нет данных от движка.'))
             ])]),
+            atlasElement('details',{'class':'at-card at-monitor-panel at-owned-rules'},[atlasElement('summary',{'aria-label':'Добавлено из соединений'},[label('Добавлено из соединений'),pill(String(owned.length),'neutral')]),node('div','at-padded',owned.length ? owned.map(function(x){return node('div','at-owned-rule-summary',[node('strong','',label(x.rule.name)),node('small','',label(x.section.name+' · '+x.rule.domains.concat(x.rule.cidrs).join(', '))),node('div','at-actions',[self.button('Изменить',function(){return self.connectionRuleDialog(null,x);},'small',self.busy()),self.button('Убрать',function(){return self.connectionRuleDialog(null,x,true);},'small danger-link',self.busy())])]);}) : [node('p','at-footnote',label('Правила останутся здесь после закрытия соединения.'))])]),
             atlasElement('details', {'class':'at-card at-monitor-panel'}, [atlasElement('summary',{'aria-label':'Правила работающего движка'},[label('Правила работающего движка'),pill(String(rules.length),'neutral')]),node('div','at-padded',[
                 rules.length ? node('div', 'at-rule-list', [
                     node('div','at-rule at-rule-head',[node('span','',label('Тип')),node('span','',label('Условие')),node('span','',label('Выход'))],{'aria-hidden':'true'}),
@@ -1417,5 +1484,3 @@ return view.extend({
             node('section', 'at-card at-padded', [node('h3', '', label('Ограничения проверки')), node('p', 'at-footnote', label('Atlas не видит собственный DoH/VPN клиента и не обещает анонимность. В режиме «По правилам» трафик вне заданных правил идёт напрямую. Для защиты всей сети выберите глобальный режим и дополнительно проверьте соединение с клиентского устройства.'))])]));
     }
 });
-
-
