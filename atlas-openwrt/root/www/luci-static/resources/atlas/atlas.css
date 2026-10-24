@@ -297,3 +297,13 @@
 .atlas .at-profile-help>summary{cursor:pointer;width:fit-content;color:var(--at-accent);font-size:12px}
 .atlas .at-profile-help[open]{padding:8px 10px;border:1px solid var(--at-line);border-radius:7px}
 .atlas .at-profile-help p{margin:6px 0 0;font-size:12px;line-height:1.4}
+
+.atlas .at-flow{grid-template-columns:minmax(0,1.4fr) minmax(0,.5fr) minmax(0,1fr) auto auto;padding:6px 8px;gap:3px 8px}
+.atlas .at-flow-actions{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;min-width:0}
+.atlas .at-flow-actions .at-btn{font-size:11px;padding:4px 7px;min-height:28px;white-space:normal;max-width:160px}
+.at-owned-rule,.at-owned-rule-summary{padding:8px 0;border-bottom:1px solid #2c3140;min-width:0}
+.at-owned-rule-summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.at-owned-rule-summary small{flex:1 1 180px;overflow-wrap:anywhere}
+.at-owned-rule-fields .at-textarea{min-height:58px}
+.at-connection-related{display:grid;gap:6px}
+@container(max-width:650px){.atlas .at-flow{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.atlas .at-flow-target{grid-column:1/-1;grid-row:1}.atlas .at-flow-origin{grid-column:1;grid-row:2}.atlas .at-flow-route{grid-column:2;grid-row:2}.atlas .at-flow-traffic{grid-column:1;grid-row:3}.atlas .at-flow-actions{grid-column:2;grid-row:3}}
