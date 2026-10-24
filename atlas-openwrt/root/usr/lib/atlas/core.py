@@ -1129,10 +1129,14 @@ def validate_settings(data):
     sections, names = [], set()
     for section in result['sections']:
         required = {'name', 'policy', 'domains', 'cidrs', 'source_ips'}
-        allowed = required | {'routed_source_ips', 'pools', 'pool', 'interface', 'resolver', 'source_interfaces', 'ports', 'networks', 'id', 'enabled', 'mixed_proxy', 'outbound_config', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips', 'resolve_real_ip', 'auto_interval_seconds', 'auto_tolerance_ms', 'urltest_url', 'udp_over_tcp', 'udp_over_tcp_version', 'urltest_fallbacks', 'urltest_download_check', 'urltest_download_url', 'site_checks'}
+        allowed = required | {'connection_rules', 'routed_source_ips', 'pools', 'pool', 'interface', 'resolver', 'source_interfaces', 'ports', 'networks', 'id', 'enabled', 'mixed_proxy', 'outbound_config', 'exclude_domains', 'exclude_cidrs', 'exclude_source_ips', 'resolve_real_ip', 'auto_interval_seconds', 'auto_tolerance_ms', 'urltest_url', 'udp_over_tcp', 'udp_over_tcp_version', 'urltest_fallbacks', 'urltest_download_check', 'urltest_download_url', 'site_checks'}
         if not isinstance(section, dict) or required - set(section) or set(section) - allowed:
             raise AtlasError('Некорректная секция маршрутизации')
         section = dict(section)
+        from connection_rules import normalize as normalize_connection_rules
+        section['connection_rules'] = normalize_connection_rules(section.get('connection_rules', []))
+        if section['connection_rules'] and section['policy'] != 'proxy':
+            raise AtlasError('Правила из соединений относятся к прокси-секции')
         checks=section.setdefault('site_checks',[])
         if not isinstance(checks,list) or len(checks)>3:
             raise AtlasError('Проверки сайтов: не больше трёх адресов на группу')
@@ -1312,10 +1316,23 @@ def validate_settings(data):
                     seen_values.add(item)
                     out.append(item)
             normalized[key] = out
-        if normalized['enabled'] and not listener['enabled'] and not normalized['outbound_config'] and not any(x.get('section') == normalized['id'] for x in result['remote_lists']) and result['fetch_lists_section'] != normalized['id'] and not any(normalized[key] for key in ('domains', 'cidrs', 'source_ips', 'routed_source_ips', 'source_interfaces', 'ports', 'networks')):
+        normalized['connection_rules'] = section['connection_rules']
+        if normalized['enabled'] and not normalized['connection_rules'] and not listener['enabled'] and not normalized['outbound_config'] and not any(x.get('section') == normalized['id'] for x in result['remote_lists']) and result['fetch_lists_section'] != normalized['id'] and not any(normalized[key] for key in ('domains', 'cidrs', 'source_ips', 'routed_source_ips', 'source_interfaces', 'ports', 'networks')):
             raise AtlasError('Добавьте в секцию хотя бы одно правило')
         sections.append(normalized)
     result['sections'] = sections
+    connection_ids = [r['id'] for s in sections for r in s['connection_rules']]
+    if len(connection_ids) > 256 or len(set(connection_ids)) != len(connection_ids):
+        raise AtlasError('Не больше 256 правил из соединений с уникальными ID')
+    assigned_addresses = set()
+    for section in sections:
+        if not section['enabled']:
+            continue
+        for record in section['connection_rules']:
+            addresses = set(record['domains'] + record['cidrs'])
+            if assigned_addresses & addresses:
+                raise AtlasError('Адрес повторяется в правилах из соединений. Измените или перенесите существующее правило.')
+            assigned_addresses.update(addresses)
     section_ids = {x['id']: x for x in sections}
     for item in result['remote_lists']:
         target = item['section']
@@ -1837,7 +1854,27 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         positions={section['id']:i for i,section in enumerate(settings['sections'])}
         tail=rules[exclusion_insert_at:]
         rules[exclusion_insert_at:]=sorted(tail,key=lambda rule:positions.get(section_rule_owner.get(id(rule)),len(positions)))
-    rules[exclusion_insert_at:exclusion_insert_at] = priority_exclusions
+    # Explicit assignments from the monitor precede ordinary section matches.
+    # Private networks and global exclusions remain ahead of them.
+    connection_routes = []
+    connection_dns = []
+    for section in settings['sections']:
+        if not section['enabled']:
+            continue
+        for record in section['connection_rules']:
+            target = section_targets[section['id']]
+            for value in record['domains']:
+                match = {'domain_suffix': [value]}
+                rule = register_section_rule(dict(match, action='route', outbound=target), section)
+                connection_routes.append((len(value.split('.')), rule))
+                resolver = section_resolvers.get(section['id'])
+                if resolver:
+                    section_route_dns[(target, json.dumps(match, sort_keys=True))] = resolver
+                connection_dns.append(dict(match, action='route', server=resolver or ('fakeip' if settings['fakeip'] else 'secure')))
+            for value in record['cidrs']:
+                connection_routes.append((128, register_section_rule({'ip_cidr': [value], 'action': 'route', 'outbound': target}, section)))
+    connection_routes.sort(key=lambda item: item[0], reverse=True)
+    rules[exclusion_insert_at:exclusion_insert_at] = priority_exclusions + [rule for _, rule in connection_routes]
     if settings['routed_source_ips']:
         rules.append({'source_ip_cidr': settings['routed_source_ips'], 'action': 'route', 'outbound': 'proxy'})
     for key, match, outbound in [('domains', 'domain_suffix', 'proxy'), ('cidrs', 'ip_cidr', 'proxy')]:
@@ -1928,7 +1965,8 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
     # A deny rule must win over a custom DNS resolver or FakeIP rewrite.
     def priority_dns_reject(rule):
         return rule.get('action')=='reject' and (not settings['group_order'] or id(rule) not in dns_rule_owner)
-    dns_rules = [rule for rule in dns_rules if priority_dns_reject(rule)] + priority_dns_exclusions + [rule for rule in dns_rules if not priority_dns_reject(rule)]
+    connection_dns.sort(key=lambda rule: len(rule['domain_suffix'][0].split('.')), reverse=True)
+    dns_rules = [rule for rule in dns_rules if priority_dns_reject(rule)] + priority_dns_exclusions + connection_dns + [rule for rule in dns_rules if not priority_dns_reject(rule)]
     if settings['fakeip']:
         # List downloads validate real public addresses before opening a connection.
         # Keep their hosts out of FakeIP; the list-fetch inbound still selects its proxy.

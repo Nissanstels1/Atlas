@@ -58,7 +58,8 @@ METHODS = {'status': {}, 'save_subscription': {'id': '', 'name': '', 'url': '', 
            'export_backup': {}, 'restore_backup': {'content': ''}, 'diagnostic_report': {},
            'delete_subscription': {'id': ''}, 'save_settings': {'settings': {}},
            'import_rules': {'content': '', 'target': ''},
-           'action': {'operation': '', 'id': ''}, 'monitor': {}, 'dashboard_access': {}, 'section_dashboard': {}, 'section_select': {'id':'','group':'','member':''}}
+           'action': {'operation': '', 'id': ''}, 'monitor': {}, 'dashboard_access': {}, 'section_dashboard': {}, 'section_select': {'id':'','group':'','member':''},
+           'connection_rule': {'operation':'', 'section':'', 'id':'', 'target':{}}}
 
 
 def stored_config_dir(settings):
@@ -346,7 +347,7 @@ def runtime_monitor():
                 'network': short(metadata.get('network', ''), 12),
                 'host': short(metadata.get('host', ''), 253),
                 'destination': short(metadata.get('destinationIP', '') or item.get('destination', ''), 253),
-                'source': short(item.get('source', ''), 128),
+                'source': short(metadata.get('sourceIP', '') or item.get('source', ''), 128),
                 'chains': [short(base_tag(value), 64) for value in chains[:4] if isinstance(value, str)],
                 'rule': short(item.get('rule', ''), 100),
                 'rule_payload': short(item.get('rulePayload', ''), 180),
@@ -2048,6 +2049,8 @@ def public_status():
         public_settings['remote_lists'].append(item)
     public_settings.pop('mixed_proxy_password', None)
     for section in public_settings.get('sections', []):
+        from connection_rules import revision as connection_rule_revision
+        section['connection_rules_revision'] = connection_rule_revision(section.get('connection_rules', []))
         section['mixed_proxy'].pop('password', None)
         section['outbound_config_set'] = bool(section.pop('outbound_config', []))
     for source in public_settings.get('list_catalogue', []):
@@ -2167,7 +2170,15 @@ def dispatch(method, args):
         if active_job().get('status') in ('queued', 'running'):
             raise AtlasError('Дождитесь завершения операции')
         current = state()
-        if method == 'service_logs':
+        if method == 'connection_rule':
+            from connection_rules import preview as connection_preview, change as change_connection_rule
+            if args.get('operation') == 'preview':
+                return dict(ok=True, **connection_preview(args.get('target')))
+            result = change_connection_rule(current['settings'], args.get('operation'), args.get('section'), args.get('id'), args.get('target'))
+            current['settings'] = validate_settings(current['settings'])
+            atomic(STATE, current)
+            return dict(ok=True, **result)
+        elif method == 'service_logs':
             output=run(['/sbin/logread','-e','atlas'],5)
             if output.returncode:raise AtlasError('Журнал OpenWrt недоступен')
             lines=output.stdout.decode('utf-8',errors='replace').splitlines()
@@ -2202,6 +2213,8 @@ def dispatch(method, args):
             if original is None:raise AtlasError('Секция не найдена')
             clone=copy.deepcopy(original);clone.update(id=secrets.token_hex(8),name=args.get('name',''),enabled=False)
             clone['mixed_proxy']=dict(enabled=False,listen='',port=2081,username='',password='')
+            for record in clone.get('connection_rules', []):
+                record['id'] = secrets.token_hex(8)
             current['settings']['sections'].append(clone)
             current['settings']=validate_settings(current['settings'])
             import_result={'ok':True,'id':clone['id']}
@@ -2518,6 +2531,11 @@ def dispatch(method, args):
                 old_section = old_sections.get(section.get('id')) or next(
                     (x for x in old_sections.values() if x['name'] == section.get('name')), None)
                 if old_section:
+                    from connection_rules import revision as connection_rule_revision
+                    submitted_revision = section.pop('connection_rules_revision', None)
+                    if submitted_revision is not None and submitted_revision != connection_rule_revision(old_section.get('connection_rules', [])):
+                        raise AtlasError('Правила из соединений изменились. Обновите форму перед сохранением.')
+                    section.setdefault('connection_rules', old_section.get('connection_rules', []))
                     section.setdefault('id', old_section['id'])
                     section.setdefault('outbound_config', old_section['outbound_config'])
                     for field in ('resolve_real_ip','auto_interval_seconds','auto_tolerance_ms','urltest_url','udp_over_tcp','udp_over_tcp_version','urltest_fallbacks','urltest_download_check','urltest_download_url','site_checks'):
