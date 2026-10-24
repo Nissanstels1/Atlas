@@ -33,7 +33,8 @@
           "set_autostart",
           "service_logs",
           "nft_diagnostics",
-          "security_compare"
+          "security_compare",
+          "connection_rule"
         ]
       }
     }
