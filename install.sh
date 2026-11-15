@@ -26,7 +26,7 @@ fi
 repair_ref=bfc88112e254e83ffae72126f07cdbf9cf0874fa
 wget -q -O "$directory/repair.sh" "https://raw.githubusercontent.com/Nissanstels1/Atlas/$repair_ref/atlas-openwrt/tools/repair-nanopi-audit.sh"
 actual=$(sha256sum "$directory/repair.sh" | awk '{print $1}')
-[ "$actual" = '400e04be5e6c38ad88d682dac6079d46ad3589ca79ca3daba7cc0a52fd45f244' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
+[ "$actual" = '1883c1d477b238e9c899b680fdf077f75d11f473fcc5fd5ee3786732486e4ee4' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
 # Pin the repair's source downloads too; future main changes cannot mix revisions.
 /usr/bin/python3 - "$directory/repair.sh" "$repair_ref" <<'PY'
 from pathlib import Path

@@ -18,6 +18,67 @@ def state():
 
 
 class PrivacyFeatures(unittest.TestCase):
+    def test_direct_fakeip_keeps_ambiguous_lookups_private(self):
+        current = state()
+        current['settings'].update(fakeip=True, direct_fakeip_doh=True,
+            dns_filter='custom', custom_dns_type='https', custom_dns_server='9.9.9.10',
+            custom_dns_sni='dns10.quad9.net', bypass_domains=['direct.example'], domains=['proxy.example'],
+            remote_lists=[{'name':'IP proxy', 'url':'https://example.org/ip.txt', 'policy':'proxy',
+                           'format':'cidrs', 'enabled':True, 'domains':[], 'cidrs':['203.0.113.0/24']}])
+        c = core.make_config(current)
+        servers = {x['tag']: x for x in c['dns']['servers']}
+        self.assertEqual(servers['secure']['detour'], 'proxy')
+        self.assertEqual(servers['direct-doh']['type'], 'https')
+        self.assertNotIn('detour', servers['direct-doh'])
+        self.assertEqual(servers['direct-doh']['tls']['server_name'], 'dns10.quad9.net')
+        self.assertTrue(c['dns']['independent_cache'])
+        self.assertEqual(next(x for x in c['outbounds'] if x['tag']=='direct')['domain_resolver'], 'direct-doh')
+        dns_rules = c['dns']['rules']
+        direct = [x for x in dns_rules if x.get('domain_suffix') == ['direct.example']]
+        self.assertTrue(any(x.get('server') == 'fakeip' and x.get('query_type') == ['A','AAAA'] for x in direct))
+        self.assertTrue(any(x.get('server') == 'direct-doh' for x in direct))
+        self.assertTrue(any(x.get('server') == 'fakeip' and x.get('query_type') == ['A','AAAA']
+                            and not x.get('domain_suffix') for x in dns_rules))
+        self.assertTrue(any(x.get('server') == 'secure' and not x.get('domain_suffix') for x in dns_rules))
+        rules = c['route']['rules']
+        direct_index = next(i for i,x in enumerate(rules) if x.get('type') == 'logical' and x.get('outbound') == 'direct'
+                            and {'domain_suffix':['direct.example']} in x.get('rules', []))
+        sniff_index = next(i for i,x in enumerate(rules) if x.get('action') == 'sniff')
+        resolve_index = next(i for i,x in enumerate(rules) if x.get('action') == 'resolve' and x.get('server') == 'secure')
+        private_index = next(i for i,x in enumerate(rules) if x.get('ip_is_private') is True)
+        proxy_ip_index = next(i for i,x in enumerate(rules) if x.get('ip_cidr') == ['203.0.113.0/24'])
+        self.assertLess(direct_index, resolve_index)
+        self.assertLess(direct_index, sniff_index)
+        self.assertIn({'port':53, 'invert':True}, rules[direct_index]['rules'])
+        self.assertLess(resolve_index, private_index)
+        self.assertLess(resolve_index, proxy_ip_index)
+        self.assertNotIn('_fallback_server', repr(c))
+
+    def test_direct_fakeip_requires_fakeip_and_encrypted_dns(self):
+        for settings in [
+            {'direct_fakeip_doh': True},
+            {'fakeip':True, 'direct_fakeip_doh':True, 'dns_filter':'custom', 'custom_dns_type':'udp'},
+            {'fakeip':True, 'direct_fakeip_doh':True, 'disable_quic':True},
+            {'fakeip':True, 'direct_fakeip_doh':'yes'},
+        ]:
+            with self.subTest(settings=settings), self.assertRaises(core.AtlasError):
+                core.validate_settings(settings)
+
+    def test_direct_dns_audit_checks_active_configuration(self):
+        current = state()
+        active = core.make_config(current)
+        current['settings'].update(fakeip=True, direct_fakeip_doh=True)
+        audit = core.privacy_checks(current['settings'], active)
+        status = next(x for x in audit['checks'] if x['id'] == 'encrypted_dns')
+        self.assertNotIn('прямой DoH', status['label'])
+        split = core.make_config(current)
+        status = next(x for x in core.privacy_checks(current['settings'], split)['checks'] if x['id'] == 'encrypted_dns')
+        self.assertTrue(status['ok'])
+        self.assertIn('прямой DoH', status['label'])
+        next(x for x in split['dns']['servers'] if x['tag']=='direct-doh')['tls']['enabled'] = False
+        status = next(x for x in core.privacy_checks(current['settings'], split)['checks'] if x['id'] == 'encrypted_dns')
+        self.assertFalse(status['ok'])
+
     def test_ad_filter_audit_uses_active_config_not_unsaved_settings(self):
         s = state()
         active = core.make_config(s)

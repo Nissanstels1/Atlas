@@ -792,7 +792,7 @@ def defaults():
         'bootstrap_dns_sni': 'cloudflare-dns.com', 'bootstrap_dns_path': '/dns-query',
         'udp_over_tcp': False, 'udp_over_tcp_version': 2,
         'interface_monitoring': False, 'monitored_interfaces': [], 'interface_reload_delay_ms': 2000, 'default_interface': '', 'log_level': 'warn',
-        'dns_filter': 'cloudflare', 'fakeip': False, 'fakeip_ttl_seconds': 60, 'resolve_real_ip': False, 'browser_diagnostics': False, 'yacd_enabled': False, 'yacd_wan': False, 'yacd_listen': '127.0.0.1', 'blocked_domains': [], 'max_active_nodes': 2048,
+        'dns_filter': 'cloudflare', 'fakeip': False, 'direct_fakeip_doh': False, 'fakeip_ttl_seconds': 60, 'resolve_real_ip': False, 'browser_diagnostics': False, 'yacd_enabled': False, 'yacd_wan': False, 'yacd_listen': '127.0.0.1', 'blocked_domains': [], 'max_active_nodes': 2048,
         'routing_excluded_ips': [], 'routed_source_ips': [], 'capture_interfaces': [], 'sections': [], 'disable_quic': False, 'exclude_ntp': False,
         'kill_switch': False,
         'custom_dns_type': 'https', 'custom_dns_server': '', 'custom_dns_sni': '', 'custom_dns_path': '/dns-query',
@@ -874,6 +874,14 @@ def validate_settings(data):
     if type(result['group_order']) is not bool:raise AtlasError('Порядок групп должен быть логическим значением')
     if type(result['fakeip']) is not bool:
         raise AtlasError('Некорректный флаг FakeIP')
+    if type(result['direct_fakeip_doh']) is not bool:
+        raise AtlasError('Некорректный режим FakeIP для прямых сайтов')
+    if result['direct_fakeip_doh'] and not result['fakeip']:
+        raise AtlasError('Для прямого FakeIP включите FakeIP')
+    if result['direct_fakeip_doh'] and result['dns_filter'] == 'custom' and result['custom_dns_type'] != 'https':
+        raise AtlasError('Для прямого FakeIP выберите зашифрованный DNS через HTTPS (DoH)')
+    if result['direct_fakeip_doh'] and result['disable_quic']:
+        raise AtlasError('Прямой FakeIP пока несовместим с блокировкой QUIC')
     if type(result['browser_diagnostics']) is not bool:
         raise AtlasError('Некорректный флаг диагностики браузера')
     if result['browser_diagnostics'] and not result['fakeip']:
@@ -1514,7 +1522,7 @@ def fakeip_record_rules(rules):
             result.append(rule)
             continue
         match = {k: copy.deepcopy(v) for k, v in rule.items()
-                 if k not in ('action', 'server', 'rewrite_ttl')}
+                 if k not in ('action', 'server', 'rewrite_ttl', '_fallback_server')}
         def for_types(types):
             if match.get('type') == 'logical':
                 return {'type': 'logical', 'mode': 'and',
@@ -1527,7 +1535,7 @@ def fakeip_record_rules(rules):
         result.append(dict(for_types(['SVCB', 'HTTPS']), action='predefined', rcode='NOERROR'))
         # TXT/MX/NS and other records retain the resolver of the same policy,
         # rather than falling through to a later section's DNS decision.
-        result.append(dict(match, action='route', server='secure'))
+        result.append(dict(match, action='route', server=rule.get('_fallback_server', 'secure')))
     return result
 
 
@@ -1560,6 +1568,8 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
              'interval': '%ds' % settings['auto_interval_seconds'], 'tolerance': settings['auto_tolerance_ms'],
              'idle_timeout': '30m', 'interrupt_exist_connections': settings['interrupt_connections']},
             {'type': 'direct', 'tag': 'direct'}, {'type': 'block', 'tag': 'policy-block'}] + outs
+    if settings['direct_fakeip_doh'] and not probe_node:
+        next(out for out in outs if out['tag'] == 'direct')['domain_resolver'] = 'direct-doh'
     pool_tags = {}
     enabled_subs = {s['id']: s for s in state.get('subscriptions', []) if s.get('enabled', True)}
     if settings['fetch_lists_via_proxy'] and settings['fetch_lists_subscription'] and settings['fetch_lists_subscription'] not in enabled_subs:
@@ -1919,6 +1929,13 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                       'path': '/dns-query', 'tls': {'enabled': True, 'server_name': 'cloudflare-dns.com'},
                       'detour': default_dns_outbound}
     dns_servers.append(secure_dns)
+    if settings['direct_fakeip_doh'] and not probe_node:
+        # Explicit direct destinations use the same authenticated DoH service,
+        # but without a dependency on the proxy outbound.
+        direct_dns = copy.deepcopy(secure_dns)
+        direct_dns['tag'] = 'direct-doh'
+        direct_dns.pop('detour', None)
+        dns_servers.append(direct_dns)
     empty_direct = {x['tag'] for x in outs if x.get('type') == 'direct' and set(x) <= {'type','tag'}}
     for server in dns_servers:
         if server.get('detour') in empty_direct:
@@ -1928,11 +1945,14 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
     if settings['fakeip']:
         dns_servers.append({'type': 'fakeip', 'tag': 'fakeip',
                             'inet4_range': '198.18.0.0/15', 'inet6_range': 'fc00::/18'})
-        def domain_dns_rule(match, proxy):
-            return dict(match, action='route', server='fakeip' if proxy else 'secure',
-                        **({'rewrite_ttl': settings['fakeip_ttl_seconds']} if proxy else {}))
+        def domain_dns_rule(match, proxy, direct_fallback=False):
+            synthetic = proxy or (settings['direct_fakeip_doh'] and not probe_node)
+            return dict(match, action='route', server='fakeip' if synthetic else 'secure',
+                        **({'rewrite_ttl': settings['fakeip_ttl_seconds']} if synthetic else {}),
+                        **({'_fallback_server': 'direct-doh'} if synthetic and direct_fallback else {}))
         if settings['bypass_domains']:
-            priority_dns_exclusions.append(domain_dns_rule({'domain_suffix': settings['bypass_domains']}, False))
+            priority_dns_exclusions.append(domain_dns_rule({'domain_suffix': settings['bypass_domains']}, False,
+                                                           direct_fallback=settings['direct_fakeip_doh'] and not probe_node))
         ordered_sections = sorted(settings['sections'], key=lambda x: x['policy'] != 'exclude')
         ordered_lists = sorted(settings['remote_lists'], key=lambda x: x['policy'] != 'exclude')
         for section in ordered_sections:
@@ -1955,7 +1975,7 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             target = priority_dns_exclusions if item['policy'] == 'exclude' else dns_rules
             dns_rule=dict(match, action='reject') if item['policy'] in ('block', 'dnsblock') else domain_dns_rule(match,item['policy']=='proxy')
             target.append(group_dns(dns_rule,assigned) if assigned else dns_rule)
-        if settings['mode'] == 'global':
+        if settings['mode'] == 'global' or (settings['direct_fakeip_doh'] and not probe_node):
             dns_rules.append(domain_dns_rule({}, True))
         elif settings['domains']:
             dns_rules.append(domain_dns_rule({'domain_suffix': settings['domains']}, True))
@@ -1984,6 +2004,24 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             {'domain': ['fakeip.podkop.fyi', 'ip.podkop.fyi'], 'query_type': ['HTTPS'], 'action': 'reject'},
             {'domain': ['fakeip.podkop.fyi', 'ip.podkop.fyi'], 'action': 'route', 'server': 'fakeip', 'rewrite_ttl': settings['fakeip_ttl_seconds']}]
     dns_rules = fakeip_record_rules(dns_rules)
+    if settings['direct_fakeip_doh'] and not probe_node:
+        # A domain may be matched by an IP-only proxy rule. Resolve ambiguous
+        # names through the proxy before evaluating address-based rules; do not
+        # leak them to the direct DNS. Match explicit bypass domains before
+        # sniffing: otherwise a different HTTP Host / TLS SNI could cause an
+        # unrelated FakeIP destination to be resolved by the direct DNS.
+        if settings['bypass_domains']:
+            first_sniff = next((i for i, rule in enumerate(rules) if rule.get('action') == 'sniff'), 0)
+            rules.insert(first_sniff, {'type':'logical', 'mode':'and', 'rules':[
+                {'domain_suffix': settings['bypass_domains']}, {'port':53, 'invert':True}],
+                'action':'route', 'outbound':'direct'})
+        first_private = next((i for i, rule in enumerate(rules) if rule.get('ip_is_private') is True), None)
+        if first_private is not None:
+            prefix = []
+            if settings['routing_excluded_ips']:
+                prefix.append({'source_ip_cidr': settings['routing_excluded_ips'], 'action': 'route', 'outbound': 'direct'})
+            prefix.append({'action': 'resolve', 'server': 'secure', 'strategy': 'prefer_ipv4'})
+            rules[first_private:first_private] = prefix
     inbounds = [inbound] + section_inbounds
     if tun:
         interfaces = sorted({i for s in settings['sections'] for i in s['source_interfaces']})
@@ -2021,6 +2059,8 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                       'rule_set': rule_sets,
                       'rules': rules if not probe_node else [],
                       'final': 'proxy' if probe_node or settings['mode'] == 'global' else 'direct'}}
+    if settings['direct_fakeip_doh'] and not probe_node:
+        config['dns']['independent_cache'] = True
     if settings['default_interface']:
         config['route']['default_interface'] = settings['default_interface']
     cache_path = {'flash': '/etc/atlas/cache.db', 'ram': '/tmp/atlas/cache.db'}.get(settings['cache_storage'], settings['cache_custom_path'])
@@ -2051,6 +2091,11 @@ def privacy_checks(settings, config, running=False, validated=False):
     route = config.get('route', {})
     route_rules = route.get('rules', [])
     secure = next((item for item in servers if item.get('tag') == 'secure'), {})
+    direct_dns = next((item for item in servers if item.get('tag') == 'direct-doh'), None)
+    direct_dns_ok = (direct_dns is None or
+                     (direct_dns.get('type') == 'https' and bool(direct_dns.get('tls', {}).get('enabled'))
+                      and not direct_dns.get('detour') and any(x.get('tag') == 'direct' and
+                      x.get('domain_resolver') == 'direct-doh' for x in config.get('outbounds', []))))
     dns_filter_active=secure.get('tls',{}).get('server_name')=='dns.adguard-dns.com' or any(x.get('action')=='reject' and (x.get('domain_suffix') or x.get('rule_set')) for x in rules)
     from security import uniform_proxy_expected
     covered=uniform_proxy_expected(settings,config)
@@ -2062,7 +2107,7 @@ def privacy_checks(settings, config, running=False, validated=False):
          (any(item.get('type') == 'direct' and item.get('tag') == 'dhcp-dns' and item.get('listen') == '127.0.0.42' for item in config.get('inbounds', [])) and
           any(item.get('action') == 'hijack-dns' and 'dhcp-dns' in item.get('inbound', []) for item in route_rules)),
          'label': 'Конфигурация принимает DNS dnsmasq через Atlas' if settings['dhcp_dns_enabled'] else 'Перенаправление DNS dnsmasq не включено'},
-        {'id': 'encrypted_dns', 'ok': secure.get('type') in ('https','tls') and secure.get('detour') == 'proxy' and bool(secure.get('tls', {}).get('enabled')), 'label': 'Основной DNS шифруется HTTPS/TLS через прокси'},
+        {'id': 'encrypted_dns', 'ok': secure.get('type') in ('https','tls') and secure.get('detour') == 'proxy' and bool(secure.get('tls', {}).get('enabled')) and direct_dns_ok, 'label': 'DNS для прокси и неоднозначных адресов шифруется через прокси; явные прямые исключения используют прямой DoH' if direct_dns is not None else 'Основной DNS шифруется HTTPS/TLS через прокси'},
         {'id': 'bootstrap_dns', 'ok': any(item.get('tag') == 'bootstrap' and item.get('type') in ('https','tls') and item.get('tls', {}).get('enabled') for item in servers), 'label': 'Bootstrap запросы для адресов прокси тоже используют TLS'},
         {'id': 'no_ecs', 'ok': 'client_subnet' not in dns and all('client_subnet' not in item for item in rules), 'label': 'IP-подсеть клиента не добавляется в DNS-запросы'},
         {'id': 'strict_route', 'ok': bool(inbound.get('strict_route') and inbound.get('auto_redirect')), 'label': 'Включены строгая маршрутизация и перехват TUN'},

@@ -1,5 +1,7 @@
 """Run the public bootstrap against isolated package-manager/RPC fixtures."""
 import hashlib
+import ast
+import json
 import re
 import os
 from pathlib import Path
@@ -28,6 +30,23 @@ class BootstrapTests(unittest.TestCase):
     def test_bundled_bootstrap_matches_current_overlay(self):
         digest = hashlib.sha256((ROOT / 'tools/repair-nanopi-audit.sh').read_bytes()).hexdigest()
         self.assertIn(digest, (ROOT / 'install.sh').read_text())
+
+    def test_repair_manifest_and_selected_view_match_sources(self):
+        script = (ROOT / 'tools/repair-nanopi-audit.sh').read_text()
+        match = re.search(r'^files=(\{.*\})$', script, re.M)
+        self.assertIsNotNone(match)
+        files = ast.literal_eval(match.group(1))
+        for relative, expected in files.items():
+            with self.subTest(path=relative):
+                content = (ROOT / relative).read_bytes()
+                self.assertEqual(hashlib.sha256(content).hexdigest(), expected)
+        menu = json.loads((ROOT / 'root/usr/share/luci/menu.d/luci-app-atlas.json').read_text())
+        name = menu['admin/services/atlas']['action']['path'].split('/')[-1] + '.js'
+        source = (ROOT / 'root/www/luci-static/resources/view/atlas/overview.js').read_bytes()
+        versioned = 'root/www/luci-static/resources/view/atlas/' + name
+        self.assertIn(versioned, files)
+        self.assertEqual((ROOT / versioned).read_bytes(), source)
+        self.assertIn(hashlib.sha256(source).hexdigest()[:8], name)
 
     def run_fixture(self, manager, failure=''):
         with tempfile.TemporaryDirectory() as temporary:
