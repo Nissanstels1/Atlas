@@ -23,7 +23,7 @@ elif command -v apk >/dev/null 2>&1; then
 else echo 'No supported package manager.'; exit 1
 fi
 # Install the verified post-release fixes from one immutable source revision.
-repair_ref=bfc88112e254e83ffae72126f07cdbf9cf0874fa
+repair_ref=1e710666725a565466905e717ba3ac650d172d44
 wget -q -O "$directory/repair.sh" "https://raw.githubusercontent.com/Nissanstels1/Atlas/$repair_ref/atlas-openwrt/tools/repair-nanopi-audit.sh"
 actual=$(sha256sum "$directory/repair.sh" | awk '{print $1}')
 [ "$actual" = '1883c1d477b238e9c899b680fdf077f75d11f473fcc5fd5ee3786732486e4ee4' ] || { echo 'Post-release repair checksum mismatch. Installation incomplete.'; exit 1; }
