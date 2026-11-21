@@ -542,6 +542,61 @@ class Persistence(unittest.TestCase):
         self.assertEqual(saved['etag'],'"etag1"')
         self.assertTrue(saved['change']['unchanged'])
 
+    def test_large_subscription_is_batched_and_waits_for_explicit_apply(self):
+        current=atlas.state()
+        current['subscriptions'][0]['nodes']=[]
+        body='\n'.join(BASE.replace('example.com', 'n%d.example.com' % i) + '#node%d' % i for i in range(600)).encode()
+        sizes=[]
+        make=atlas.make_config
+        def measure(state, **kwargs):
+            sizes.append(len(state['subscriptions'][0]['nodes']))
+            return make(state, **kwargs)
+        with mock.patch.object(atlas,'fetch',return_value=(body,{})), mock.patch.object(atlas,'check'), \
+             mock.patch.object(atlas,'make_config',side_effect=measure), mock.patch.object(atlas,'service_running',return_value=True), \
+             mock.patch.object(atlas,'apply') as apply, mock.patch.object(atlas,'maintain_artifacts'):
+            message=atlas.refresh(current)
+        self.assertEqual(sizes,[128,128,128,128,88])
+        self.assertEqual(len(atlas.state()['subscriptions'][0]['nodes']),600)
+        self.assertTrue(atlas.state()['subscriptions'][0]['change']['review_required'])
+        self.assertIn('фильтры',message)
+        apply.assert_not_called()
+        with mock.patch.object(atlas,'fetch',return_value=(None,{},'','',True)), \
+             mock.patch.object(atlas,'service_running',return_value=True), mock.patch.object(atlas,'apply') as apply, \
+             mock.patch.object(atlas,'maintain_artifacts'):
+            atlas.refresh(atlas.state())
+        self.assertTrue(atlas.state()['subscriptions'][0]['change']['review_required'])
+        apply.assert_not_called()
+
+    def test_large_subscription_pending_flag_clears_after_successful_apply(self):
+        current=atlas.state()
+        current['subscriptions'][0]['change']={'review_required':True}
+        atlas.atomic(atlas.STATE,current)
+        def running(name='atlas'):return name=='atlas'
+        with mock.patch.object(atlas,'service_running',side_effect=running),mock.patch.object(atlas,'check'), \
+             mock.patch.object(atlas,'run',return_value=mock.Mock(returncode=0)),mock.patch.object(atlas.time,'sleep'), \
+             mock.patch.object(atlas,'clash_request',return_value={'proxies':{}}):
+            atlas.apply(current)
+        self.assertNotIn('review_required',atlas.state()['subscriptions'][0]['change'])
+
+    def test_subscription_filters_only_change_the_selected_source_and_survive_backup(self):
+        current=atlas.state()
+        second=copy.deepcopy(current['subscriptions'][0]);second['id']='c'*16
+        first=current['subscriptions'][0]
+        first['nodes']=[core.uri_node(BASE.replace('example.com','fi.example.com')+'#🇫🇮 Finland'),
+                        core.uri_node(BASE.replace('example.com','lte.example.com')+'#🇫🇮 LTE'),
+                        core.uri_node(BASE.replace('example.com','ru.example.com')+'#🇷🇺 Russia')]
+        current['subscriptions'].append(second)
+        atlas.atomic(atlas.STATE,current)
+        atlas.dispatch('save_subscription_filters',{'id':first['id'],'countries':['FI'], 'exclude_names':['LTE']})
+        saved=atlas.state()
+        eligible=core.filter_nodes(core.all_nodes(saved),saved['settings'])
+        self.assertEqual([x['name'] for x in eligible if x['key'].startswith(first['id'])],['🇫🇮 Finland'])
+        self.assertEqual(len([x for x in eligible if x['key'].startswith(second['id'])]),1)
+        from backups import restore_state, make_backup
+        restored=restore_state(json.dumps(make_backup(saved), ensure_ascii=False))
+        self.assertEqual(restored['subscriptions'][0]['source_countries'],['FI'])
+        self.assertEqual(restored['subscriptions'][0]['source_exclude_names'],['lte'])
+
     def test_save_subscription_keeps_headers_private_and_clears_them_on_new_origin(self):
         atlas.dispatch('save_subscription',{'id':'b'*16,'name':'Test','url':'','enabled':True,
             'headers':'Authorization: Bearer TOPSECRET_auth_header'})

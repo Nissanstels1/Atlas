@@ -15,7 +15,7 @@ from outbounds import outbound_graph, namespace_graph, validate_references
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 MAX_BYTES = 4 * 1024 * 1024
-MAX_NODES = 512
+MAX_NODES = 2048
 MAX_ACTIVE_NODES = 1024
 MAX_SUBSCRIPTIONS = 64
 MAX_TOTAL_NODES = 4096
@@ -214,7 +214,7 @@ def transport_from_query(q):
     if kind == 'grpc':
         if q.get('mode', 'gun') not in ('gun', ''):
             raise AtlasError('Поддерживается только gRPC gun')
-        return {'type': 'grpc', 'service_name': text(q.get('serviceName', ''))}
+        return {'type': 'grpc', 'service_name': text(q.get('serviceName', ''), 2048)}
     if kind in ('http', 'h2'):
         return {'type': 'http', 'host': [host(x) for x in q.get('host', '').split(',') if x], 'path': text(q.get('path', '/'), 2048)}
     raise AtlasError('Транспорт %s не поддерживается' % text(kind, 32))
@@ -411,7 +411,7 @@ def normalize(raw, name=None):
                 raise AtlasError('Некорректные заголовки WebSocket')
             tr['headers'] = {text(k, 64): text(v, 512) for k, v in headers.items()}
         if tr['type'] == 'grpc':
-            tr['service_name'] = text(tr.get('service_name', ''), 256)
+            tr['service_name'] = text(tr.get('service_name', ''), 2048)
         if tr['type'] == 'http':
             if not isinstance(tr.get('host', []), list) or len(tr.get('host', [])) > 16:
                 raise AtlasError('Некорректный список HTTP host')
@@ -688,7 +688,7 @@ def _clash_node(raw):
         elif network == 'grpc':
             if set(options) - {'grpc-service-name', 'service-name', 'authority'}:
                 raise AtlasError('Поля gRPC Clash не поддерживаются')
-            out['transport'] = {'type':'grpc', 'service_name':text(options.get('grpc-service-name', options.get('service-name', '')), 256)}
+            out['transport'] = {'type':'grpc', 'service_name':text(options.get('grpc-service-name', options.get('service-name', '')), 2048)}
         else:
             if set(options) - {'path', 'host'}:
                 raise AtlasError('Поля HTTP/2 Clash не поддерживаются')
@@ -715,7 +715,7 @@ def _parse_clash_yaml(value):
     if not isinstance(obj, dict) or not isinstance(obj.get('proxies'), list):
         raise AtlasError('Clash YAML должен содержать массив proxies')
     if len(obj['proxies']) > MAX_NODES:
-        raise AtlasError('Больше 512 профилей в одной подписке')
+        raise AtlasError('Больше %d профилей в одной подписке' % MAX_NODES)
     nodes, warnings, seen = [], [], set()
     for index, item in enumerate(obj['proxies']):
         try:
@@ -929,7 +929,7 @@ def _parse_xray_subscription(configs):
                     except (AtlasError, ValueError, KeyError, TypeError, AttributeError, OverflowError):
                         chained += 1
                     if len(nodes) > MAX_NODES:
-                        raise AtlasError('Больше 512 профилей в одной подписке')
+                        raise AtlasError('Больше %d профилей в одной подписке' % MAX_NODES)
                     continue
                 # Unknown transport, TLS and connection controls are rejected rather
                 # than silently changing the meaning of a provider's profile.
@@ -1001,7 +1001,7 @@ def _parse_xray_subscription(configs):
             except (AtlasError, ValueError, KeyError, TypeError, AttributeError, OverflowError):
                 unsupported += 1
             if len(nodes) > MAX_NODES:
-                raise AtlasError('Больше 512 профилей в одной подписке')
+                raise AtlasError('Больше %d профилей в одной подписке' % MAX_NODES)
     if not nodes:
         raise AtlasError('В подписке Xray нет поддерживаемых независимых профилей; прежние профили сохранены')
     warnings = []
@@ -1047,7 +1047,7 @@ def parse_subscription(body, trusted_json=False):
         items = [x.strip() for x in value.splitlines() if x.strip() and not x.startswith('#')]
         parse = uri_node
     if len(items) > MAX_NODES:
-        raise AtlasError('Больше 512 профилей в одной подписке')
+        raise AtlasError('Больше %d профилей в одной подписке' % MAX_NODES)
     nodes, errors, seen = [], [], set()
     for i, item in enumerate(items):
         try:
@@ -1075,6 +1075,7 @@ def defaults():
         'interface_monitoring': False, 'monitored_interfaces': [], 'interface_reload_delay_ms': 2000, 'default_interface': '', 'log_level': 'warn',
         'dns_filter': 'cloudflare', 'fakeip': False, 'direct_fakeip_doh': False, 'dns_fallback_direct_doh': False, 'fakeip_ttl_seconds': 60, 'resolve_real_ip': False, 'browser_diagnostics': False, 'yacd_enabled': False, 'yacd_wan': False, 'yacd_listen': '127.0.0.1', 'blocked_domains': [], 'max_active_nodes': 2048,
         'routing_excluded_ips': [], 'routed_source_ips': [], 'capture_interfaces': [], 'sections': [], 'disable_quic': False, 'exclude_ntp': False,
+        'adaptive_proxy_enabled': False, 'adaptive_proxy_section': '',
         'kill_switch': False,
         'custom_dns_type': 'https', 'custom_dns_server': '', 'custom_dns_sni': '', 'custom_dns_path': '/dns-query',
         'mixed_proxy_enabled': False, 'mixed_proxy_listen': '', 'mixed_proxy_port': 2080,
@@ -1131,6 +1132,10 @@ def validate_settings(data):
         raise AtlasError('Путь можно задавать только для внешнего кеша')
     if result['mode'] not in ('rules', 'global'):
         raise AtlasError('Неизвестный режим')
+    if type(result['adaptive_proxy_enabled']) is not bool or not isinstance(result['adaptive_proxy_section'], str):
+        raise AtlasError('Некорректные настройки автоматического прокси')
+    if result['adaptive_proxy_enabled'] and result['mode'] != 'rules':
+        raise AtlasError('Автоматический прокси доступен в режиме маршрутизации по правилам')
     if not isinstance(result['selected'], str) or not re.fullmatch(r'auto|[a-f0-9]{32}', result['selected']):
         raise AtlasError('Некорректный выбор узла')
     if type(result['interval_hours']) is not int or not 1 <= result['interval_hours'] <= 168:
@@ -1161,6 +1166,14 @@ def validate_settings(data):
         raise AtlasError('Некорректный режим резервного DNS')
     if result['dns_fallback_direct_doh'] and result['dns_filter'] == 'custom' and result['custom_dns_type'] != 'https':
         raise AtlasError('Резервный DNS требует DNS через HTTPS (DoH)')
+    if result['adaptive_proxy_enabled'] and result['dns_filter'] == 'custom':
+        try:
+            dns_ip=ipaddress.ip_address(result['custom_dns_server'])
+            usable=dns_ip.is_global and not dns_ip.is_multicast
+        except ValueError:
+            usable=False
+        if result['custom_dns_type'] != 'https' or not usable:
+            raise AtlasError('Для автоматической проверки нужен DoH с публичным IP DNS-сервера')
     if result['direct_fakeip_doh'] and not result['fakeip']:
         raise AtlasError('Для прямого FakeIP включите FakeIP')
     if result['direct_fakeip_doh'] and result['dns_filter'] == 'custom' and result['custom_dns_type'] != 'https':
@@ -1627,6 +1640,11 @@ def validate_settings(data):
                 raise AtlasError('Адрес повторяется в правилах из соединений. Измените или перенесите существующее правило.')
             assigned_addresses.update(addresses)
     section_ids = {x['id']: x for x in sections}
+    adaptive_target = result['adaptive_proxy_section']
+    if adaptive_target and (adaptive_target not in section_ids or not section_ids[adaptive_target]['enabled'] or section_ids[adaptive_target]['policy'] != 'proxy' or section_ids[adaptive_target]['outbound_config']):
+        if result['adaptive_proxy_enabled']:
+            raise AtlasError('Для автоматического прокси выберите включённую прокси-секцию')
+        result['adaptive_proxy_section']=''
     for item in result['remote_lists']:
         target = item['section']
         compatible=target in section_ids and ((item['policy']=='proxy' and section_ids[target]['policy'] in ('proxy','interface','direct')) or item['policy']==section_ids[target]['policy'] and item['policy'] in ('direct','block'))
@@ -1695,12 +1713,25 @@ def country_source_for_node(node, now=None):
     return 'provider-name' if country_from_name(node.get('name', '')) else 'unknown'
 
 
+def source_filters(countries, excluded_names):
+    if not isinstance(countries, list) or len(countries) > 50 or any(not isinstance(x, str) or not re.fullmatch(r'[A-Z]{2}', x) for x in countries):
+        raise AtlasError('Укажите коды стран через запятую, например DE, FI')
+    if not isinstance(excluded_names, list) or len(excluded_names) > 50 or any(not isinstance(x, str) or not x.strip() or len(x) > 80 for x in excluded_names):
+        raise AtlasError('Некорректный фильтр названий подписки')
+    return list(dict.fromkeys(countries)), list(dict.fromkeys(x.strip().casefold() for x in excluded_names))
+
+
 def filter_nodes(nodes, settings, validated=False):
     settings = settings if validated else validate_settings(settings)
     result = []
     for n in nodes:
         name = n['name'].casefold()
         country = country_for_node(n, settings['require_verified_countries'])
+        source_countries = n.get('source_countries', [])
+        if source_countries and country_for_node(n) not in source_countries:
+            continue
+        if any(word in name for word in n.get('source_exclude_names', [])):
+            continue
         if (settings['require_verified_countries'] and not country and
                 any(settings[k] for k in ('countries', 'excluded_countries', 'preferred_countries'))):
             continue
@@ -1741,10 +1772,13 @@ def all_nodes(state, *, copy_nodes=True):
     nodes = []
     for sub in state['subscriptions']:
         if sub.get('enabled', True):
+            source_countries, source_exclude_names = source_filters(
+                sub.get('source_countries', []), sub.get('source_exclude_names', []))
             for n in sub.get('nodes', []):
                 item = copy.deepcopy(n) if copy_nodes else dict(n)
                 item['key'] = sub['id'] + n['id']
                 item['subscription'] = sub['name']
+                item['source_countries'], item['source_exclude_names'] = source_countries, source_exclude_names
                 nodes.append(item)
     return nodes
 
@@ -2022,6 +2056,17 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
     if tun and settings['fetch_lists_via_proxy']:
         fetch_outbound = section_targets[settings['fetch_lists_section']] if settings['fetch_lists_section'] else ('pool_' + settings['fetch_lists_subscription']) if settings['fetch_lists_subscription'] else 'proxy'
         rules.append({'inbound': ['list-fetch'], 'action': 'route', 'outbound': fetch_outbound})
+    adaptive_active = tun and not probe_node and settings['adaptive_proxy_enabled']
+    adaptive_diagnostics = False
+    if adaptive_active:
+        from adaptive_routing import suspension_reason
+        adaptive_diagnostics = not suspension_reason(settings)
+        adaptive_target = section_targets[settings['adaptive_proxy_section']] if settings['adaptive_proxy_section'] else 'proxy'
+        # Persist the applied selection and requested log level independently of
+        # subsequently saved-but-unapplied settings, without exposing secrets.
+        outs.append({'type':'block','tag':'atlas_adaptive_selected_'+(settings['adaptive_proxy_section'] or 'main')})
+        outs.append({'type':'block','tag':'atlas_adaptive_log_'+settings['log_level']})
+        rules.append({'inbound':['adaptive-probe'], 'action':'route', 'outbound':adaptive_target})
     section_inbounds = []
     section_rule_resolution = {}
     section_rule_owner={}
@@ -2207,6 +2252,10 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
     for key, match, outbound in [('domains', 'domain_suffix', 'proxy'), ('cidrs', 'ip_cidr', 'proxy')]:
         if settings[key]:
             rules.append({match: settings[key], 'action': 'route', 'outbound': outbound})
+    if adaptive_active:
+        # Explicit rules, source exclusions and private networks retain priority.
+        rules.append({'rule_set':['atlas-adaptive'], 'action':'route', 'outbound':adaptive_target})
+        rule_sets.append({'type':'local', 'format':'source', 'tag':'atlas-adaptive', 'path':'/var/run/atlas/adaptive-rules.json'})
     if not probe_node and (settings['resolve_real_ip'] or any(x['resolve_real_ip'] is True for x in settings['sections'])):
         resolved_rules = []
         proxy_targets = {'proxy'} | set(pool_tags.values()) | {section_targets[x['id']] for x in settings['sections'] if x['policy'] in ('proxy','interface')}
@@ -2306,6 +2355,8 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             target = priority_dns_exclusions if item['policy'] == 'exclude' else dns_rules
             dns_rule=dict(match, action='reject') if item['policy'] in ('block', 'dnsblock') else domain_dns_rule(match,item['policy']=='proxy')
             target.append(group_dns(dns_rule,assigned) if assigned else dns_rule)
+        if adaptive_active:
+            dns_rules.append(domain_dns_rule({'rule_set':['atlas-adaptive']}, True))
         if settings['mode'] == 'global' or (settings['direct_fakeip_doh'] and not probe_node):
             dns_rules.append(domain_dns_rule({}, True))
         elif settings['domains']:
@@ -2378,11 +2429,24 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             fetch_port = listener.getsockname()[1]
         inbounds.append({'type':'mixed','tag':'list-fetch','listen':'127.0.0.1','listen_port':fetch_port,
                          'users':[{'username':'atlas-fetch','password':secrets.token_urlsafe(24)}]})
+    if adaptive_active:
+        used_ports={x.get('listen_port') for x in inbounds if isinstance(x,dict)} | {19090}
+        adaptive_port=None
+        for _ in range(16):
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0))
+                candidate=listener.getsockname()[1]
+            if candidate not in used_ports:
+                adaptive_port=candidate
+                break
+        if adaptive_port is None:raise AtlasError('Нет свободного локального порта проверки')
+        inbounds.append({'type':'mixed','tag':'adaptive-probe','listen':'127.0.0.1','listen_port':adaptive_port,
+                         'users':[{'username':'atlas-adaptive','password':secrets.token_urlsafe(24)}]})
     if tun and settings['mixed_proxy_enabled']:
         inbounds.append({'type':'mixed','tag':'lan-mixed','listen':settings['mixed_proxy_listen'],
                          'listen_port':settings['mixed_proxy_port'],
                          'users':[{'username':settings['mixed_proxy_username'],'password':settings['mixed_proxy_password']}]})
-    config = {'log': {'level': settings['log_level'], 'timestamp': True},
+    config = {'log': {'level': 'debug' if adaptive_diagnostics else settings['log_level'], 'timestamp': True},
             'dns': {'servers': dns_servers, 'rules': dns_rules,
                     'final': 'secure', 'strategy': 'prefer_ipv4', 'reverse_mapping': True},
             'inbounds': inbounds, 'outbounds': outs,

@@ -4,7 +4,7 @@ import json
 import re
 from core import (AtlasError, MAX_SUBSCRIPTIONS, MAX_NODES, MAX_TOTAL_NODES,
                   defaults, normalize, normalize_custom, normalize_editor_node, subscription_url,
-                  subscription_headers, text, validate_settings)
+                  source_filters, subscription_headers, text, validate_settings)
 
 MAX_BACKUP_BYTES = 16 * 1024 * 1024
 
@@ -78,8 +78,10 @@ def restore_state(content):
         count += len(rebuilt) + sum(len(node.get('chain', [])) for node in rebuilt)
         if count > MAX_TOTAL_NODES:
             raise AtlasError('Резервная копия содержит более 4096 профилей')
+        countries, excluded_names = source_filters(source.get('source_countries', []), source.get('source_exclude_names', []))
         state['subscriptions'].append({'id': source['id'], 'name': name, 'url': url,
             'source': 'local' if local else 'remote', 'enabled': source.get('enabled', True),
             'nodes': rebuilt, 'headers': {} if local else headers, 'updated': 0,
+            'source_countries': countries, 'source_exclude_names': excluded_names,
             'metadata': {}, 'error': '', 'warnings': [], 'format': source.get('format', 'backup')})
     return state

@@ -21,6 +21,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -36,7 +37,7 @@ from urllib.parse import urlsplit, quote, urlencode
 from download_policy import DownloadPolicy
 from site_policy import SitePolicy
 from security import compare_client, fingerprint
-from core import AtlasError, MAX_BYTES, MAX_RULE_LIST_ENTRIES, MAX_SUBSCRIPTIONS, MAX_TOTAL_NODES, all_nodes, custom_auto_policy, real_ip_resolution_active, country_for_node, country_source_for_node, defaults, filter_nodes, host, make_config, parse_subscription, privacy_checks, rank_auto_candidates, rule_set_format, rule_list_url, section_node_prefix, selection_nodes, subscription_headers, subscription_url, text, validate_settings
+from core import AtlasError, MAX_BYTES, MAX_RULE_LIST_ENTRIES, MAX_SUBSCRIPTIONS, MAX_TOTAL_NODES, all_nodes, custom_auto_policy, real_ip_resolution_active, country_for_node, country_source_for_node, defaults, filter_nodes, host, make_config, parse_subscription, privacy_checks, rank_auto_candidates, rule_set_format, rule_list_url, section_node_prefix, selection_nodes, source_filters, subscription_headers, subscription_url, text, validate_settings
 
 DATA = Path('/etc/atlas')
 RUN = Path('/var/run/atlas')
@@ -50,6 +51,7 @@ ADBLOCK_PRESETS = {
     'hagezi': 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/light.txt',
 }
 METHODS = {'status': {}, 'save_subscription': {'id': '', 'name': '', 'url': '', 'enabled': True, 'headers': '', 'clear_headers': False},
+           'save_subscription_filters': {'id':'', 'countries':[], 'exclude_names':[]},
            'import_subscriptions': {'items': []},
            'import_profiles': {'name': '', 'content': '', 'id': ''},
            'get_profiles': {'id': ''}, 'section_details': {'id': ''},
@@ -59,7 +61,8 @@ METHODS = {'status': {}, 'save_subscription': {'id': '', 'name': '', 'url': '', 
            'delete_subscription': {'id': ''}, 'save_settings': {'settings': {}},
            'import_rules': {'content': '', 'target': ''},
            'action': {'operation': '', 'id': ''}, 'monitor': {}, 'dashboard_access': {}, 'section_dashboard': {}, 'section_select': {'id':'','group':'','member':''},
-           'connection_rule': {'operation':'', 'section':'', 'id':'', 'target':{}}}
+           'connection_rule': {'operation':'', 'section':'', 'id':'', 'target':{}},
+           'adaptive_rule': {'operation':'', 'host':''}, 'adaptive_settings': {'enabled':False, 'section':''}, 'adaptive_list': {}}
 
 
 def stored_config_dir(settings):
@@ -84,6 +87,13 @@ def prepare_runtime_paths(config, settings):
     created = not path.parent.exists()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if created:path.parent.chmod(0o700)
+    if any(x.get('tag') == 'atlas-adaptive' for x in config.get('route',{}).get('rule_set',[]) if isinstance(x,dict)):
+        RUN.mkdir(mode=0o700,parents=True,exist_ok=True)
+        dynamic=RUN/'adaptive-rules.json'
+        if dynamic.is_symlink():
+            raise AtlasError('Файл автоматических правил не должен быть ссылкой')
+        if not dynamic.exists():
+            atomic(dynamic,{'version':3,'rules':[]})
 
 
 
@@ -113,6 +123,62 @@ def atomic(path, data):
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+
+
+def adaptive_suppressed():
+    value=read_json(DATA/'adaptive-suppressed.json',{})
+    if not isinstance(value,dict):raise ValueError('invalid adaptive suppression')
+    now=time.time()
+    return {host for host,until in value.items() if isinstance(host,str) and type(until) in (int,float) and until>now}
+
+
+def adaptive_status(running, settings=None):
+    config=read_json(CONFIG,{}) if running else {}
+    active=running and any(isinstance(x,dict) and x.get('tag')=='adaptive-probe' for x in config.get('inbounds',[]))
+    data=read_json(RUN/'adaptive-rules.json',{}) if active else {}
+    rows=data.get('rules',[]) if isinstance(data,dict) else []
+    domains=rows[0].get('domain',[]) if rows and isinstance(rows[0],dict) else []
+    if not isinstance(domains,list):domains=[]
+    heartbeat=read_json(RUN/'adaptive-status.json',{}) if active else {}
+    stamp=heartbeat.get('at',0) if isinstance(heartbeat,dict) else 0
+    healthy=type(stamp) in (int,float) and 0 <= time.time()-stamp < 20
+    suspended=heartbeat.get('suspended','') if healthy else ''
+    if active:
+        from adaptive_routing import suspension_reason
+        desired=settings if settings is not None else state()['settings']
+        reason=suspension_reason(desired) if desired['adaptive_proxy_enabled'] else 'mode'
+        if reason:
+            healthy=True
+            suspended=reason
+    return {'active':bool(active),'healthy':bool(healthy),'suspended':suspended if suspended in ('mode','devices','lists','sections') else '',
+            'domains':[x for x in domains[:100] if isinstance(x,str)]}
+
+
+def adaptive_remove(hostname):
+    from connection_rules import domain
+    hostname=domain(hostname)
+    if hostname not in adaptive_status(service_running())['domains']:
+        raise AtlasError('Автоматическое правило уже удалено')
+    with named_lock('adaptive-suppressed.lock',True):
+        active=adaptive_suppressed()
+        if len(active)>=100 and hostname not in active:
+            raise AtlasError('Слишком много временных исключений')
+        now=int(time.time())
+        records=read_json(DATA/'adaptive-suppressed.json',{})
+        records={k:v for k,v in records.items() if k in active}
+        records[hostname]=now+24*3600
+        atomic(DATA/'adaptive-suppressed.json',records)
+    return {'ok':True}
+
+
+def adaptive_config_matches(current, applied):
+    """Never probe if saved, unapplied routing differs from the active engine."""
+    try:
+        candidate=make_config(copy.deepcopy(current))
+        active=normalized_config(applied)
+        return candidate.get('route')==active.get('route') and candidate.get('dns')==active.get('dns')
+    except (AtlasError,OSError,ValueError,KeyError,TypeError):
+        return False
 
 
 def atomic_bytes(path, data):
@@ -1465,6 +1531,17 @@ def apply(current, enable=False):
                     atomic(config_store / 'last-good.json', candidate)
                     atomic(RUN / 'applied.json', {'at': int(time.time())})
                     maintain_artifacts(current)
+                    pending = [s for s in current['subscriptions'] if s.get('enabled', True)
+                               and s.get('change', {}).get('review_required')]
+                    if pending:
+                        for sub in pending:
+                            sub['change'].pop('review_required', None)
+                        try:
+                            atomic(STATE, current)
+                        except Exception:
+                            for sub in pending:
+                                sub['change']['review_required'] = True
+                            raise
                     return
         raise AtlasError('sing-box не запустился; восстановлена предыдущая конфигурация')
     except Exception as exc:
@@ -1519,6 +1596,15 @@ def refresh_signature(current):
         for item in current['settings']['remote_lists']]
 
 
+def check_source_profiles(source):
+    """Validate large archives in bounded batches to avoid a huge test config."""
+    nodes = source.get('nodes', [])
+    for start in range(0, len(nodes), 128):
+        validation = defaults()
+        validation['subscriptions'] = [dict(source, enabled=True, nodes=nodes[start:start + 128], source_countries=[], source_exclude_names=[])]
+        check(make_config(validation, tun=False))
+
+
 def refresh(current, sub_id='', lists_only=False, due_only=False):
     before = copy.deepcopy(refresh_signature(current))
     rules_changed = False
@@ -1558,8 +1644,11 @@ def refresh(current, sub_id='', lists_only=False, due_only=False):
             else:
                 body, meta, etag, last_modified, not_modified = fetched
             if not_modified:
+                pending = sub.get('change', {}).get('review_required', False)
                 sub.update({'updated': int(time.time()), 'etag': etag, 'last_modified': last_modified, 'error': ''})
                 sub['change'] = {'added': 0, 'removed': 0, 'total': len(sub.get('nodes', [])), 'unchanged': True}
+                if pending:
+                    sub['change']['review_required'] = True
                 successes += 1
                 attempted('subscription', sub, True)
                 continue
@@ -1579,14 +1668,15 @@ def refresh(current, sub_id='', lists_only=False, due_only=False):
             if total > MAX_TOTAL_NODES:
                 raise AtlasError('Общий архив превышает 4096 профилей. Удалите старые или лишние подписки.')
             # Validate each subscription independently, even if selection points to an old node.
-            validation = defaults()
-            validation['subscriptions'] = [dest]
-            check(make_config(validation, tun=False))
+            check_source_profiles(dest)
+            pending = sub.get('change', {}).get('review_required', False) or (not old_nodes and len(new_ids) > 512)
             sub.update(parsed)
             sub.update({'updated': int(time.time()), 'metadata': meta, 'error': '', 'etag': etag,
                         'last_modified': last_modified,
                         'change': {'added': len(new_ids - old_ids), 'removed': len(old_ids - new_ids),
                                    'total': len(new_ids), 'unchanged': not (new_ids - old_ids or old_ids - new_ids)}})
+            if pending:
+                sub['change']['review_required'] = True
             successes += 1
             attempted('subscription', sub, True)
         except AtlasError as exc:
@@ -1635,11 +1725,14 @@ def refresh(current, sub_id='', lists_only=False, due_only=False):
         raise AtlasError('Нет включённых подписок или списков правил для обновления')
     atomic(STATE, current)
     changed = rules_changed or before != refresh_signature(current)
-    if changed and (successes or list_successes) and not lists_only and service_running():
+    pending = any(s.get('enabled', True) and s.get('change', {}).get('review_required') for s in current['subscriptions'])
+    if changed and (successes or list_successes) and not lists_only and not pending and service_running():
         apply(current)
     maintain_artifacts(current)
     if failures:
         raise AtlasError('Не обновлено источников: %d. Предыдущие узлы и правила сохранены; подробности в карточках.' % len(failures))
+    if pending:
+        return 'Большая подписка загружена. Настройте фильтры и нажмите «Применить изменения».'
     return ('Обновлено подписок: %d, списков правил: %d' % (successes, list_successes)) + (' · маршруты не изменились, перезапуск не нужен' if not changed else '')
 
 
@@ -2016,8 +2109,9 @@ def public_status():
         local = sub.get('source') == 'local'
         subscriptions[-1].update({'host': 'Локальный импорт' if local else urlsplit(sub.get('url', '')).hostname,
                                   'source': 'local' if local else 'remote', 'count': len(sub.get('nodes', [])),
+                                  'source_countries': sub.get('source_countries', []), 'source_exclude_names': sub.get('source_exclude_names', []),
                                   'metadata': metadata, 'headers_set': bool(sub.get('headers')),
-                                  'change': {k: sub.get('change', {}).get(k) for k in ('added','removed','total','unchanged')
+                                  'change': {k: sub.get('change', {}).get(k) for k in ('added','removed','total','unchanged','review_required')
                                              if k in sub.get('change', {})}})
     nodes = [{'key': n['key'], 'name': n['name'], 'type': n['outbound']['type'],
               'country': country_for_node(n), 'country_source': country_source_for_node(n),
@@ -2066,6 +2160,7 @@ def public_status():
                 source['adblock_preset'] = preset
         parsed = urlsplit(source['url'])
         source['url'] = source['url'] if parsed.scheme == 'file' else '%s://%s/[saved]' % (parsed.scheme, parsed.hostname)
+    adaptive=adaptive_status(running,current['settings'])
     return {'ok': True, 'running': running, 'engine': engine_version(), 'engine_features': __import__('engine_features').capabilities(BINARY),
             'subscriptions': subscriptions, 'nodes': nodes, 'interfaces': sorted(system_interfaces()), 'settings': public_settings,
             'runtime': runtime_status(raw_nodes, running), 'eligible_count': len(eligible),
@@ -2075,6 +2170,7 @@ def public_status():
             'selftest': read_json(RUN / 'selftest.json', {}),
             'auto_selection': read_json(RUN / 'auto-selection.json', {}),
             'startup': read_json(RUN/'startup.json',{}), 'last_start_failure': read_json(DATA/'last-start-failure.json',{}),
+            'adaptive_proxy': {'active':adaptive['active'], 'healthy':adaptive['healthy'], 'suspended':adaptive['suspended'], 'count':len(adaptive['domains'])},
             'watchdog': read_json(RUN / 'watchdog.json', {}), 'version': VERSION, 'autostart': os.name=='posix' and os.access('/etc/rc.d/S99atlas',os.X_OK)}
 
 
@@ -2166,10 +2262,21 @@ def dispatch(method, args):
         return public_status()
     if method == 'monitor':
         return runtime_monitor()
+    if method == 'adaptive_list':
+        return dict(ok=True, **adaptive_status(service_running()))
     with locked():
         if active_job().get('status') in ('queued', 'running'):
             raise AtlasError('Дождитесь завершения операции')
         current = state()
+        if method == 'adaptive_settings':
+            current['settings']['adaptive_proxy_enabled']=args.get('enabled')
+            current['settings']['adaptive_proxy_section']=args.get('section')
+            current['settings']=validate_settings(current['settings'])
+            atomic(STATE,current)
+            return {'ok':True}
+        if method == 'adaptive_rule':
+            if args.get('operation') != 'remove':raise AtlasError('Неизвестная операция')
+            return adaptive_remove(args.get('host'))
         if method == 'connection_rule':
             from connection_rules import preview as connection_preview, change as change_connection_rule
             if args.get('operation') == 'preview':
@@ -2271,9 +2378,7 @@ def dispatch(method, args):
             # claiming that restored country evidence is fresh or widening saved filters.
             for source in restored['subscriptions']:
                 if source['nodes']:
-                    validation = defaults()
-                    validation['subscriptions'] = [dict(source, enabled=True)]
-                    check(make_config(validation, tun=False))
+                    check_source_profiles(source)
             if all_nodes(restored) or any(x['outbound_config'] and x['enabled'] for x in restored['settings']['sections']):
                 validation = copy.deepcopy(restored)
                 validation['settings'].update(selected='auto', require_verified_countries=False, max_active_nodes=1024)
@@ -2388,15 +2493,19 @@ def dispatch(method, args):
             source = dict(parsed, id=prior['id'] if prior else secrets.token_hex(8), name=name, source='local', url='', enabled=True,
                           updated=int(time.time()), metadata={}, error='', headers={},
                           change={'added': len(parsed['nodes']), 'removed': 0, 'total': len(parsed['nodes']), 'unchanged': False})
-            validation = defaults()
-            validation['subscriptions'] = [source]
-            check(make_config(validation, tun=False))
+            check_source_profiles(source)
             if prior:
                 current['subscriptions'][current['subscriptions'].index(prior)] = source
             else:
                 current['subscriptions'].append(source)
             import_result = {'ok': True, 'id': source['id'], 'count': len(parsed['nodes']),
                              'format': parsed['format'], 'warnings': parsed['warnings']}
+        elif method == 'save_subscription_filters':
+            sub = next((x for x in current['subscriptions'] if x['id'] == args.get('id')), None)
+            if sub is None:
+                raise AtlasError('Подписка не найдена')
+            countries, names = source_filters(args.get('countries', []), args.get('exclude_names', []))
+            sub.update(source_countries=countries, source_exclude_names=names)
         elif method == 'save_subscription':
             sub_id = args.get('id', '')
             name = text(args.get('name', '').strip(), 80)
@@ -2772,6 +2881,9 @@ def supervise_engine():
     from start_guard import supervise,clock_ready
     stopped=[False]
     old_handlers={}
+    adaptive_worker=None
+    log_thread=None
+    child=None
     for signum in (signal.SIGTERM,signal.SIGINT):
         old_handlers[signum]=signal.signal(signum,lambda *args:stopped.__setitem__(0,True))
     try:
@@ -2780,9 +2892,38 @@ def supervise_engine():
             startup_report('restore-failed',failed=True,local_ready=False,network_restored=False)
             return 1
         config=prepare_engine_start(read_json(CONFIG,None))
+        if isinstance(config,dict) and any(isinstance(x,dict) and x.get('tag')=='atlas-adaptive' for x in config.get('route',{}).get('rule_set',[])):
+            atomic(RUN/'adaptive-rules.json',{'version':3,'rules':[]})
         check(config)
         atomic(CONFIG,config)
         current=state()
+        listener=next((x for x in config.get('inbounds',[]) if x.get('tag')=='adaptive-probe'),None)
+        log_level=current['settings']['log_level']
+        if listener:
+            from adaptive_routing import AdaptiveWorker, atlas_verifier, suspension_reason
+            if not listener or listener.get('listen')!='127.0.0.1' or not listener.get('users'):
+                raise AtlasError('Не найден защищённый локальный прокси для проверки')
+            tags={x.get('tag') for x in config.get('outbounds',[]) if isinstance(x,dict)}
+            log_level=next((v for v in ('debug','info','warn','error') if 'atlas_adaptive_log_'+v in tags),'warn')
+            initial=current['settings'];wanted='atlas_adaptive_selected_'+(initial['adaptive_proxy_section'] or 'main')
+            atomic(RUN/'adaptive-rules.json',{'version':3,'rules':[]})
+            (RUN/'adaptive-status.json').unlink(missing_ok=True)
+            if (initial['adaptive_proxy_enabled'] and wanted in tags and not suspension_reason(initial)
+                    and config.get('log',{}).get('level')=='debug' and adaptive_config_matches(current,config)):
+                user=listener['users'][0]
+                cached=[STATE.stat().st_mtime_ns,initial]
+                def adaptive_settings():
+                    stamp=STATE.stat().st_mtime_ns
+                    if stamp!=cached[0]:
+                        changed=state()
+                        latest=changed['settings'] if adaptive_config_matches(changed,config) else {'mode':'inactive','adaptive_proxy_enabled':False,'adaptive_proxy_section':''}
+                        cached[:]=[stamp,latest]
+                    latest=cached[1]
+                    if (not latest['adaptive_proxy_enabled'] or latest['adaptive_proxy_section']!=initial['adaptive_proxy_section']):
+                        return {'mode':'inactive'}
+                    return latest
+                verifier=atlas_verifier(adaptive_settings,listener['listen_port'],user['username'],user['password'])
+                adaptive_worker=AdaptiveWorker(RUN/'adaptive-rules.json',adaptive_settings,verifier,suppressed=adaptive_suppressed)
         dns_inbound=next((x for x in config.get('inbounds',[]) if x.get('tag')=='dhcp-dns'),None)
         if current['settings']['dhcp_dns_enabled'] and not dns_inbound:
             raise AtlasError('В конфигурации отсутствует DNS для dnsmasq')
@@ -2818,15 +2959,46 @@ def supervise_engine():
                 os._exit(126)
             if os.getppid()!=parent_pid:
                 os._exit(126)
-        child=subprocess.Popen([BINARY,'run','-c',str(CONFIG)],stdin=subprocess.DEVNULL,preexec_fn=child_setup)
+        child=subprocess.Popen([BINARY,'run','-c',str(CONFIG)],stdin=subprocess.DEVNULL,preexec_fn=child_setup,
+                               stderr=subprocess.PIPE if listener else None)
+        if listener:
+            if adaptive_worker:adaptive_worker.start()
+            def forward_engine_logs():
+                levels={'debug':10,'info':20,'warn':30,'error':40,'fatal':50,'panic':50}
+                severity_pattern=re.compile(rb'(?<![A-Z])(DEBUG|INFO|WARN|ERROR|FATAL|PANIC)(?=\x1b|\[|\s)')
+                minimum=levels[log_level]
+                forward=True
+                while True:
+                    line=child.stderr.readline(8192)
+                    if not line:break
+                    severity=severity_pattern.search(line[:128])
+                    if severity:forward=levels[severity.group(1).decode('ascii').lower()]>=minimum
+                    elif line.startswith((b'panic:',b'fatal error:')):forward=True
+                    try:
+                        if forward:sys.stderr.buffer.write(line);sys.stderr.buffer.flush()
+                    except (OSError,ValueError):pass
+                    if adaptive_worker and (b'router: sniffed protocol: tls, domain:' in line or
+                        (b'connection: open connection to ' in line and b'using outbound/direct[direct]:' in line)):
+                        try:adaptive_worker.offer(line.decode('utf-8',errors='replace'))
+                        except (OSError,ValueError):pass
+            log_thread=threading.Thread(target=forward_engine_logs,daemon=True)
+            log_thread.start()
         def report(stage,**fields):
             startup_report(stage,requires_dns=current['settings']['dhcp_dns_enabled'],**fields)
         return supervise(child,ready,attach,restore_start_network,report,stopped=lambda:stopped[0])
-    except (AtlasError,OSError,ValueError,subprocess.SubprocessError):
+    except (AtlasError,OSError,ValueError,TypeError,KeyError,RuntimeError,subprocess.SubprocessError):
+        if child is not None and child.poll() is None:
+            try:
+                child.terminate();child.wait(timeout=5)
+            except (OSError,subprocess.TimeoutExpired):
+                try:child.kill();child.wait(timeout=5)
+                except (OSError,subprocess.TimeoutExpired):pass
         restored=restore_start_network()
         startup_report('prepare-failed',failed=True,local_ready=False,network_restored=restored)
         return 1
     finally:
+        if adaptive_worker:adaptive_worker.close()
+        if log_thread:log_thread.join(timeout=2)
         for signum,handler in old_handlers.items():
             signal.signal(signum,handler)
 

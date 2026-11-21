@@ -7,6 +7,7 @@
 var api = {
     status: rpc.declare({ object: 'atlas', method: 'status', expect: {} }),
     saveSubscription: rpc.declare({ object: 'atlas', method: 'save_subscription', params: ['id', 'name', 'url', 'enabled', 'headers', 'clear_headers'], expect: {} }),
+    saveSubscriptionFilters: rpc.declare({ object: 'atlas', method: 'save_subscription_filters', params: ['id', 'countries', 'exclude_names'], expect: {} }),
     importProfiles: rpc.declare({ object: 'atlas', method: 'import_profiles', params: ['name', 'content', 'id'], expect: {} }),
     importSubscriptions: rpc.declare({ object: 'atlas', method: 'import_subscriptions', params: ['items'], expect: {} }),
     exportBackup: rpc.declare({ object: 'atlas', method: 'export_backup', expect: {} }),
@@ -23,6 +24,9 @@ var api = {
     sectionSelect: rpc.declare({ object: 'atlas', method: 'section_select', params: ['id','group','member'], expect: {} }),
     monitor: rpc.declare({ object: 'atlas', method: 'monitor', expect: {} }),
     connectionRule: rpc.declare({object:'atlas',method:'connection_rule',params:['operation','section','id','target'],expect:{}}),
+    adaptiveRule: rpc.declare({object:'atlas',method:'adaptive_rule',params:['operation','host'],expect:{}}),
+    adaptiveSettings: rpc.declare({object:'atlas',method:'adaptive_settings',params:['enabled','section'],expect:{}}),
+    adaptiveList: rpc.declare({object:'atlas',method:'adaptive_list',expect:{}}),
     configPreview: rpc.declare({object:'atlas',method:'config_preview',params:['validate'],expect:{}}),
     routeExplain: rpc.declare({object:'atlas',method:'route_explain',params:['query'],expect:{}}),
     sectionClone: rpc.declare({object:'atlas',method:'section_clone',params:['id','name'],expect:{}}),
@@ -565,11 +569,18 @@ return view.extend({
                     node('dl', 'at-details', [node('dt', '', label('Обновлено')), node('dd', '', label(date(s.updated))), node('dt', '', label('Трафик')), node('dd', '', label(bytes(used) + (meta.total > 0 ? ' / ' + bytes(meta.total) : ' · лимит не указан'))), node('dt', '', label('Срок действия')), node('dd', '', label(meta.expire > 0 ? date(meta.expire) : 'Провайдер не указал'))]),
                     atlasElement('details', {'class':'at-sub-technical'}, [atlasElement('summary', {}, 'Технические данные'), node('dl','at-details',[node('dt','',label('ID пула')),node('dd','',label(s.id)),node('dt','',label('Формат')),node('dd','',label(s.format || 'Не определён'))]), s.headers_set ? node('p', 'at-footnote', label('Для запроса настроены приватные HTTP-заголовки.')) : label('')]),
                     s.change && !s.change.unchanged && Number.isFinite(s.change.added) && Number.isFinite(s.change.removed) && Number.isFinite(s.change.total) ? node('p', 'at-footnote', label('Изменение: +' + s.change.added + ' / −' + s.change.removed + ' профилей; всего ' + s.change.total + (s.change.unchanged ? ' · без изменений' : ''))) : label(''),
+                    s.change && s.change.review_required ? node('p', 'at-inline-error', label('Большая подписка загружена. Настройте фильтры и примените изменения.')) : label(''),
                     s.error ? node('p', 'at-inline-error', label(s.error)) : label(''),
                     (s.warnings || []).length ? node('p', 'at-inline-error', label((s.warnings || []).slice(0, 3).join(' · '))) : label(''),
-                    node('div', 'at-actions at-card-footer', [s.source === 'local' ? self.button('Редактировать JSON', function() { return result(api.getProfiles(s.id)).then(function(r) { self.localProfilesDialog(s, r.content); }); }, '', self.busy()) : label(''), s.source === 'local' ? self.button(s.enabled ? 'Выключить' : 'Включить', function() { return result(api.saveSubscription(s.id, s.name, '', !s.enabled, '', false)).then(function() { return self.reload(); }); }, '', self.busy()) : self.button('Изменить', function() { self.subscriptionDialog(s); }, '', self.busy()), self.button('Удалить', function() { self.deleteDialog(s); }, 'danger-link', self.busy())])]);
+                    node('div', 'at-actions at-card-footer', [s.source === 'local' ? self.button('Редактировать JSON', function() { return result(api.getProfiles(s.id)).then(function(r) { self.localProfilesDialog(s, r.content); }); }, '', self.busy()) : label(''), s.source === 'local' ? self.button(s.enabled ? 'Выключить' : 'Включить', function() { return result(api.saveSubscription(s.id, s.name, '', !s.enabled, '', false)).then(function() { return self.reload(); }); }, '', self.busy()) : self.button('Изменить', function() { self.subscriptionDialog(s); }, '', self.busy()), self.button('Фильтр', function() { self.subscriptionFiltersDialog(s); }, '', self.busy()), self.button('Удалить', function() { self.deleteDialog(s); }, 'danger-link', self.busy())])]);
             })) : self.empty('Все ваши подписки — здесь', 'Поддерживаются URI, Base64, Clash/Mihomo YAML и sing-box JSON.', function() { self.subscriptionDialog(); }, 'Добавить первую подписку'),
-            node('p', 'at-footnote', label('До 64 источников, 512 профилей на источник и 4096 сохранённых профилей. Активный пул ограничен настройкой производительности (128–1024). Поддерживаются URI VLESS/VMess/Trojan/Shadowsocks/Hysteria2/TUIC/AnyTLS/SOCKS/HTTP, Clash/Mihomo YAML и sing-box JSON. Изменения профилей отображаются после обновления.'))]);
+            node('p', 'at-footnote', label('До 64 источников, 2048 профилей на источник и 4096 всего. Размер активного пула задаётся в настройках. Поддерживаются URI, Clash/Mihomo YAML и sing-box JSON.'))]);
+    },
+    subscriptionFiltersDialog: function(sub) {
+        var self=this, countries=node('textarea','at-input at-textarea',label((sub.source_countries || []).join(', ')),{rows:3,placeholder:'DE, FI, NL — пусто: все страны'});
+        var names=node('input','at-input',[],{value:(sub.source_exclude_names || []).join(', '),placeholder:'LTE, RUS'}), msg=node('p','at-inline-error');
+        function split(value){return value.split(',').map(function(x){return x.trim();}).filter(Boolean);}
+        ui.showModal('Фильтр подписки: '+sub.name,[node('div','at-modal',[self.field('Разрешённые страны (коды)',countries),self.field('Исключить по названию',names),node('p','at-footnote',label('Страна определяется по названию или последней проверке. Пустой список стран разрешает все. Фильтр действует только на эту подписку.')),msg]),node('div','right',[atlasElement('button',{'class':'btn',click:ui.hideModal},'Отмена'),self.button('Сохранить',function(){return result(api.saveSubscriptionFilters(sub.id,split(countries.value.toUpperCase()),split(names.value))).then(function(){ui.hideModal();return self.reload();}).catch(function(e){msg.textContent=e.message;});},'primary')])]);
     },
     subscriptionDialog: function(sub) {
         var self = this; sub = sub || {};
@@ -614,7 +625,7 @@ return view.extend({
         var content = node('textarea', 'at-input at-textarea at-local-profiles', label(initialContent || ''), { rows: 12, spellcheck: 'false', placeholder: 'vless://…\nИли вставьте Base64, Clash/Mihomo YAML, sing-box JSON' });
         var msg = node('p', 'at-inline-error');
         ui.showModal(source.id ? 'Редактирование локальных профилей' : 'Импорт профилей из текста', [node('div', 'at-modal', [self.field('Название источника', name), self.field('Профили или конфигурация', content), msg,
-            node('p', 'at-footnote', label('До 256 КиБ и 512 профилей. Atlas проверит конфигурацию через sing-box до сохранения. Локальный источник не загружается из сети. Для изменения рабочего туннеля примените настройки.'))]),
+            node('p', 'at-footnote', label('До 256 КиБ и 2048 профилей. Atlas проверит конфигурацию до сохранения. Чтобы обновить рабочий туннель, примените настройки.'))]),
             node('div', 'right', [atlasElement('button', { 'class': 'btn', click: ui.hideModal }, 'Отмена'), self.button('Импортировать профили', function() {
                 return result(api.importProfiles(name.value.trim(), content.value, source.id || '')).then(function(r) {
                     ui.hideModal();
@@ -800,7 +811,7 @@ return view.extend({
             var text=child.textContent || '',cls=child.getAttribute ? child.getAttribute('class') || '' : child.attributes && child.attributes.class || '';
             if(cls.indexOf('at-global-direct')>=0 || cls.indexOf('at-global-block')>=0)common.push(child);
             else if(cls==='at-actions')actions.push(child);
-            else if(text.indexOf('Куда направлять трафик')===0 || text.indexOf('Режим маршрутизации')===0 || text.indexOf('Секции: подключение')===0)basic.push(child);
+            else if(cls.indexOf('at-adaptive-card')>=0 || text.indexOf('Куда направлять трафик')===0 || text.indexOf('Режим маршрутизации')===0 || text.indexOf('Секции: подключение')===0)basic.push(child);
             else if(cls.indexOf('at-legacy-tunnel')>=0)legacy.push(child);
             else if(text.indexOf('Проверка до применения')===0 || text.indexOf('Журнал службы')===0)diagnostics.push(child);
             else if(text.indexOf('Импорт локального списка')===0 || text.indexOf('Удалённые списки правил')===0)lists.push(child);
@@ -1066,6 +1077,27 @@ return view.extend({
             node('div','at-actions',[self.button('Отмена',function(){ui.hideModal();},'ghost'),self.button('Сохранить расписание',function(){return result(api.saveSettings(Object.assign({},s,{interval_hours:Number(hours.value)}))).then(function(){ui.hideModal();return self.reload();});},'primary',self.busy())])
         ])]);
     },
+    adaptiveDialog: function(status) {
+        var self=this;
+        if (!status) return result(api.adaptiveList()).then(function(r){return self.adaptiveDialog(r);}).catch(error);
+        var s=self.data.settings,message=node('p','at-inline-error');
+        var enabled=node('input','',[],{type:'checkbox',checked:!!s.adaptive_proxy_enabled});
+        var sections=(s.sections || []).filter(function(x){return x.enabled!==false && x.policy==='proxy' && !x.outbound_config_set;});
+        var select=node('select','at-input',[atlasElement('option',{value:'',selected:!s.adaptive_proxy_section},'Общий прокси')].concat(sections.map(function(x){return atlasElement('option',{value:x.id,selected:s.adaptive_proxy_section===x.id},x.name);})));
+        var active=(status.domains || []).map(function(host){return node('div','at-privacy-row',[node('span','',label(host)),node('div','at-actions',[
+            self.button('В секцию',function(){if(!select.value){message.textContent='Выберите секцию для постоянного правила.';return;}return result(api.connectionRule('save',select.value,'',{name:host,domains:[host],cidrs:[]})).then(function(){message.textContent='Добавлено в секцию. Примените изменения для постоянного правила.';}).catch(function(e){message.textContent=e.message;});},'ghost',self.busy()),
+            self.button('Убрать',function(){return result(api.adaptiveRule('remove',host)).then(function(){message.textContent='Убрано. Atlas не будет снова добавлять этот адрес 24 часа.';return new Promise(function(resolve){setTimeout(resolve,1200);});}).then(function(){return self.requestStatus(true);}).then(function(d){self.data=d;ui.hideModal();self.adaptiveDialog();}).catch(function(e){message.textContent=e.message;});},'ghost',self.busy())])]);});
+        ui.showModal('Если сайт не открылся',[node('div','at-modal',[
+            node('label','at-checkbox',[enabled,label('Пробовать через прокси после ошибки соединения')]),
+            self.field('Какой прокси использовать',select),
+            node('p','at-footnote',label('После повторных ошибок Atlas проверяет HTTPS-сайт с IPv4 через выбранный прокси. Успешный адрес добавляется на час. Первое соединение остаётся прямым; иногда страницу нужно обновить. DNS-ошибки и обрывы после подключения могут не определиться.')),
+            node('p','at-footnote',label('Для распознавания ошибок домены ненадолго хранятся в оперативной памяти. Дополнительная обработка может увеличить нагрузку. При обычном уровне журнала подробные события не записываются.')),
+            node('p','at-footnote',label('Явные прямые исключения сохраняются. При исключениях по устройствам, а также при активных прямых или блокирующих списках автоматическая проверка приостанавливается.')),
+            status.active && !status.healthy ? node('p','at-inline-error',label('Проверка запускается или недоступна.')) : status.suspended ? node('p','at-inline-error',label('Проверка приостановлена: текущие правила нельзя безопасно определить по журналу.')) : label(''),
+            node('h3','',label('Временно через прокси')),
+            node('div','at-privacy-list',active.length ? active : [node('p','at-footnote',label(status.active ? 'Пока нет адресов.' : 'Режим не запущен.'))]),message
+        ]),node('div','at-actions',[self.button('Сохранить и применить',function(){return result(api.adaptiveSettings(enabled.checked,select.value)).then(function(){ui.hideModal();return self.data.running ? self.action('apply') : self.reload();}).catch(function(e){message.textContent=e.message;});},'primary',self.busy()),atlasElement('button',{'class':'btn',click:ui.hideModal},'Закрыть')])]);
+    },
     routingPage: function() {
         var self = this, d = self.data, s = d.settings;
         var mode = node('select', 'at-input', [atlasElement('option', { value: 'rules', selected: s.mode === 'rules' }, 'По правилам — остальное напрямую'), atlasElement('option', { value: 'global', selected: s.mode === 'global' }, 'Весь трафик — кроме исключений')]);
@@ -1176,6 +1208,7 @@ return view.extend({
         }));
         return self.routingLayout(node('div', 'at-content', [self.sectionHead('Куда направлять трафик', 'Исключения имеют приоритет. Локальная сеть всегда доступна напрямую.', self.button('Обновления источников',function(){self.navigate('settings');},'',self.busy())),
             self.plannerCard(),
+            node('section','at-card at-padded at-adaptive-card',[node('h3','',label('Если сайт не открылся')),node('p','at-footnote',label(!(self.data.adaptive_proxy || {}).active ? 'Выключено' : !(self.data.adaptive_proxy || {}).healthy ? 'Запускается или недоступно' : (self.data.adaptive_proxy || {}).suspended ? 'Приостановлено правилами' : 'Работает · временных адресов: '+Number((self.data.adaptive_proxy || {}).count || 0))),self.button('Настроить',function(){return self.adaptiveDialog();},'ghost',self.busy())]),
             node('section','at-card at-padded',[node('h3','',label('Журнал службы')),node('p','at-footnote',label('Последние 200 строк Atlas из системного журнала. Доступны только администратору; могут содержать адреса и сведения о подключениях.')),self.button('Показать журнал',function(){return result(api.serviceLogs()).then(function(r){ui.showModal('Журнал Atlas',[node('pre','',label(r.content||'Записей нет')),node('p','at-footnote',label(r.truncated?'Показана последняя часть журнала.':'')),atlasElement('button',{'class':'btn',click:ui.hideModal},'Закрыть')]);});},'ghost',self.busy())]),
             node('section', 'at-card at-padded', [self.field('Режим маршрутизации', mode),node('label','at-checkbox',[groupOrder,label('Проверять группы по порядку вместе с их списками')])]),
             node('section','at-card at-padded at-global-direct',[node('h3','',label('Всегда напрямую — для всех секций')),node('p','at-footnote',label('Эти сайты и IP обходят все прокси и VPN секций, в обоих режимах маршрутизации. Добавьте один раз — дублировать в секциях не нужно. Сайт при прямом доступе увидит ваш IP провайдера.')),node('div','at-grid-2',[self.field('Сайты всегда напрямую',inputs.bypass_domains,'Без https://, по одному на строку. Поддомены включены.'),self.field('IP и сети всегда напрямую',inputs.bypass_cidrs,'IP сайтов или подсети назначения, по одному на строку.')]),atlasElement('details',{},[atlasElement('summary',{},'Целые устройства напрямую'),self.field('Устройства всегда напрямую',inputs.routing_excluded_ips,'IP домашних устройств. Все их соединения обходят прокси, а не только отдельные сайты.')]),node('p','at-footnote',label('Исключения меняют маршрут, но не отключают общие запреты. Защита от прямого выхода при её включении может запретить такое соединение.'))]),
