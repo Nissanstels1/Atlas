@@ -2892,11 +2892,14 @@ def supervise_engine():
             startup_report('restore-failed',failed=True,local_ready=False,network_restored=False)
             return 1
         config=prepare_engine_start(read_json(CONFIG,None))
+        current=state()
+        # A restored config may exist before volatile cache directories are
+        # recreated after reboot. Prepare them for every engine start.
+        prepare_runtime_paths(config,current['settings'])
         if isinstance(config,dict) and any(isinstance(x,dict) and x.get('tag')=='atlas-adaptive' for x in config.get('route',{}).get('rule_set',[])):
             atomic(RUN/'adaptive-rules.json',{'version':3,'rules':[]})
         check(config)
         atomic(CONFIG,config)
-        current=state()
         listener=next((x for x in config.get('inbounds',[]) if x.get('tag')=='adaptive-probe'),None)
         log_level=current['settings']['log_level']
         if listener:

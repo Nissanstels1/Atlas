@@ -132,6 +132,7 @@ class AdaptiveConfigTests(unittest.TestCase):
             stderr=io.BytesIO(sample+sample)
         with tempfile.TemporaryDirectory() as temp:
             run=Path(temp);statepath=run/'state.json';configpath=run/'config.json'
+            config['experimental']['cache_file']['path']=str(run/'cache'/'cache.db')
             statepath.write_text(json.dumps(current));configpath.write_text(json.dumps(config))
             observed=[]
             def supervise(*args,**kwargs):
@@ -164,6 +165,7 @@ class AdaptiveConfigTests(unittest.TestCase):
             def __init__(self):self.buffer=io.BytesIO()
         with tempfile.TemporaryDirectory() as temp:
             run=Path(temp);statepath=run/'state.json';configpath=run/'config.json'
+            config['experimental']['cache_file']['path']=str(run/'cache'/'cache.db')
             statepath.write_text(json.dumps(current));configpath.write_text(json.dumps(config));observed=[];log=Log()
             def supervise(*args,**kwargs):
                 deadline=time.monotonic()+3
@@ -188,6 +190,7 @@ class AdaptiveConfigTests(unittest.TestCase):
         class Child:pass
         with tempfile.TemporaryDirectory() as temp:
             run=Path(temp);statepath=run/'state.json';configpath=run/'config.json'
+            config['experimental']['cache_file']['path']=str(run/'missing'/'cache.db')
             statepath.write_text(json.dumps(saved));configpath.write_text(json.dumps(config))
             with patch.object(atlas,'RUN',run),patch.object(atlas,'DATA',run),patch.object(atlas,'STATE',statepath),patch.object(atlas,'CONFIG',configpath), \
                  patch.object(atlas,'restore_start_network',return_value=True),patch.object(atlas,'startup_report'), \
@@ -195,6 +198,7 @@ class AdaptiveConfigTests(unittest.TestCase):
                  patch.object(atlas.subprocess,'Popen',return_value=Child()) as popen,patch.object(start_guard,'supervise',return_value=0):
                 self.assertEqual(atlas.supervise_engine(),0)
                 self.assertIsNone(popen.call_args.kwargs['stderr'])
+                self.assertTrue((run/'missing').is_dir())
 
     def test_saved_but_unapplied_disable_filters_debug_and_clears_rules(self):
         applied=state_with_node();applied['settings']['adaptive_proxy_enabled']=True;config=core.make_config(applied)
@@ -204,6 +208,7 @@ class AdaptiveConfigTests(unittest.TestCase):
             def __init__(self):self.buffer=io.BytesIO()
         with tempfile.TemporaryDirectory() as temp:
             run=Path(temp);statepath=run/'state.json';configpath=run/'config.json';log=Log()
+            config['experimental']['cache_file']['path']=str(run/'cache'/'cache.db')
             statepath.write_text(json.dumps(saved));configpath.write_text(json.dumps(config))
             (run/'adaptive-rules.json').write_text('{"version":3,"rules":[{"domain":["old.example.com"]}]}')
             with patch.object(atlas,'RUN',run),patch.object(atlas,'DATA',run),patch.object(atlas,'STATE',statepath),patch.object(atlas,'CONFIG',configpath), \
