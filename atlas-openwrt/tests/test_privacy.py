@@ -18,6 +18,40 @@ def state():
 
 
 class PrivacyFeatures(unittest.TestCase):
+    @mock.patch('core.engine_features.capabilities', return_value=['urltest.fallbacks', 'urltest.background'])
+    def test_emergency_dns_only_uses_direct_for_dns(self, _features):
+        current = state()
+        current['settings'].update(fakeip=True, direct_fakeip_doh=True, dns_fallback_direct_doh=True,
+                                   domains=['proxy.example'], cidrs=['203.0.113.0/24'])
+        c = core.make_config(current)
+        out = {x['tag']: x for x in c['outbounds']}
+        secure = next(x for x in c['dns']['servers'] if x['tag'] == 'secure')
+        self.assertEqual(secure['detour'], 'atlas-dns-fallback')
+        self.assertEqual(out['atlas-dns-fallback']['outbounds'], ['proxy'])
+        self.assertEqual(out['atlas-dns-fallback']['fallbacks'], ['atlas-dns-direct'])
+        self.assertEqual(out['atlas-dns-direct']['domain_resolver'], 'bootstrap')
+        self.assertNotIn('atlas-dns-direct', out['proxy']['outbounds'])
+        self.assertTrue(any(x.get('outbound') == 'proxy' and x.get('ip_cidr') == ['203.0.113.0/24'] for x in c['route']['rules']))
+        self.assertFalse(any(x.get('outbound') == 'atlas-dns-direct' for x in c['route']['rules']))
+
+    @mock.patch('core.engine_features.capabilities', return_value=['urltest.fallbacks', 'urltest.background'])
+    def test_emergency_dns_keeps_missing_profiles_blocked(self, _features):
+        current = core.defaults()
+        current['settings'].update(fakeip=True, direct_fakeip_doh=True, dns_fallback_direct_doh=True,
+                                   domains=['proxy.example'])
+        c = core.make_config(current)
+        out = {x['tag']: x for x in c['outbounds']}
+        self.assertEqual(out['local-only-block']['type'], 'block')
+        self.assertEqual(out['auto']['outbounds'], ['local-only-block'])
+        self.assertEqual(next(x for x in c['dns']['servers'] if x['tag'] == 'secure')['detour'], 'atlas-dns-fallback')
+
+    def test_emergency_dns_requires_explicit_consent_and_https(self):
+        self.assertFalse(core.defaults()['settings']['dns_fallback_direct_doh'])
+        for settings in ({'dns_fallback_direct_doh': 'yes'},
+                         {'dns_fallback_direct_doh': True, 'dns_filter': 'custom', 'custom_dns_type': 'udp'}):
+            with self.subTest(settings=settings), self.assertRaises(core.AtlasError):
+                core.validate_settings(settings)
+
     def test_direct_fakeip_keeps_ambiguous_lookups_private(self):
         current = state()
         current['settings'].update(fakeip=True, direct_fakeip_doh=True,

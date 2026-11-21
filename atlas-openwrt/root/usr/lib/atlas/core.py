@@ -734,6 +734,283 @@ def _looks_like_clash(value):
     return bool(re.search(r'(?m)^\s*(?:proxies|proxy-groups|proxy-providers)\s*:', value))
 
 
+def _xray_chain_paths(config, root):
+    """Resolve a bounded, fail-closed Xray loopback/SOCKS chain to VLESS hops.
+
+    Only the simple routing form understood here is accepted. Unknown rules,
+    public SOCKS servers, ambiguous references and direct exits are rejected.
+    """
+    outbounds, inbounds = config.get('outbounds', []), config.get('inbounds', [])
+    routing = config.get('routing') or {}
+    rules, balancers = routing.get('rules') or [], routing.get('balancers') or []
+    if not all(isinstance(x, list) and len(x) <= MAX_NODES for x in (outbounds, inbounds, rules, balancers)):
+        raise AtlasError('Некорректная цепочка Xray')
+    def indexed(items):
+        result = {}
+        for item in items:
+            if not isinstance(item, dict): raise AtlasError('Некорректная цепочка Xray')
+            tag = item.get('tag')
+            if tag:
+                if not isinstance(tag, str) or tag in result: raise AtlasError('Повторяющийся тег Xray')
+                result[tag] = item
+        return result
+    outs, bals = indexed(outbounds), indexed(balancers)
+    ipv4_only = False
+    def descend(kind, key, visited):
+        nonlocal ipv4_only
+        if not isinstance(key, str) or not key or len(key) > 256 or (kind, key) in visited or len(visited) >= 16:
+            raise AtlasError('Цикл или некорректная ссылка в цепочке Xray')
+        visited = visited | {(kind, key)}
+        if kind == 'inbound':
+            for rule in rules:
+                if not isinstance(rule, dict): raise AtlasError('Некорректное правило Xray')
+                scoped = rule.get('inboundTag')
+                if scoped is not None:
+                    if not isinstance(scoped, list): raise AtlasError('Некорректный вход Xray')
+                    if key not in scoped: continue
+                    if set(rule) - {'type', 'inboundTag', 'outboundTag', 'balancerTag'}:
+                        raise AtlasError('Условная цепочка Xray не поддерживается')
+                    dest, bal = rule.get('outboundTag'), rule.get('balancerTag')
+                    if bool(dest) == bool(bal): raise AtlasError('Неоднозначный маршрут Xray')
+                    return descend('outbound' if dest else 'balancer', dest or bal, visited)
+                # The observed provider blocks IPv6 and UDP/443 before its
+                # internal SOCKS route. The VLESS transport is TCP; enforce
+                # IPv4 on the proxy server connection when IPv6 is blocked.
+                block = outs.get(rule.get('outboundTag')) or {}
+                if block.get('protocol') != 'blackhole':
+                    raise AtlasError('Общие правила цепочки Xray не поддерживаются')
+                if set(rule) <= {'type', 'outboundTag', 'ip'} and rule.get('ip') == ['::/0']:
+                    ipv4_only = True
+                elif (set(rule) <= {'type', 'outboundTag', 'network', 'port'} and
+                      rule.get('network') == 'udp' and str(rule.get('port')) == '443'):
+                    continue
+                else:
+                    raise AtlasError('Общие ограничения Xray не поддерживаются')
+            raise AtlasError('Маршрут внутреннего входа Xray не найден')
+        if kind == 'balancer':
+            bal = bals.get(key)
+            if not bal or set(bal) - {'tag', 'selector', 'strategy', 'fallbackTag'}:
+                raise AtlasError('Балансировщик Xray не поддерживается')
+            selectors = bal.get('selector') or []
+            if not isinstance(selectors, list) or len(selectors) > MAX_NODES or any(not isinstance(x, str) or not x for x in selectors):
+                raise AtlasError('Некорректный список балансировщика Xray')
+            members = [x for x in outs if any(x.startswith(prefix) for prefix in selectors)]
+            if len(members) > 1: raise AtlasError('Неоднозначный балансировщик цепочки Xray')
+            paths = []
+            for member in members:
+                paths.extend(descend('outbound', member, visited))
+            fallback = bal.get('fallbackTag')
+            if fallback:
+                extra = descend('outbound', fallback, visited)
+                # A live fallback behind a nonempty selection has different
+                # priority semantics and must not be silently promoted.
+                if paths and extra: raise AtlasError('Резервная цепочка Xray не поддерживается')
+                paths.extend(extra)
+            return paths
+        item = outs.get(key)
+        if not item: raise AtlasError('Подключение цепочки Xray не найдено')
+        kind = item.get('protocol')
+        if kind == 'blackhole': return []
+        if kind == 'loopback':
+            settings = item.get('settings') or {}
+            if not isinstance(settings, dict) or set(settings) != {'inboundTag'}:
+                raise AtlasError('Некорректный loopback Xray')
+            return descend('inbound', settings['inboundTag'], visited)
+        if kind == 'socks':
+            settings = item.get('settings') or {}
+            servers = settings.get('servers') if isinstance(settings, dict) else None
+            if set(item) - {'tag','protocol','settings'} or set(settings) - {'servers'} or not isinstance(servers, list) or len(servers) != 1 or not isinstance(servers[0], dict):
+                raise AtlasError('Внутренний SOCKS Xray не поддерживается')
+            server = servers[0]
+            if set(server) - {'address','port','users'}: raise AtlasError('Некорректный SOCKS Xray')
+            try: local = ipaddress.ip_address(server.get('address', '')).is_loopback
+            except ValueError: local = server.get('address') == 'localhost'
+            if not local: raise AtlasError('Внешний SOCKS в цепочке Xray не поддерживается')
+            matching = [x for x in inbounds if isinstance(x, dict) and x.get('protocol') == 'socks' and str(x.get('port')) == str(server.get('port'))]
+            if len(matching) != 1: raise AtlasError('Внутренний SOCKS-вход Xray не найден')
+            inbound = matching[0]
+            listen = inbound.get('listen', '127.0.0.1')
+            try: local_listen = ipaddress.ip_address(listen).is_loopback
+            except ValueError: local_listen = listen == 'localhost'
+            options = inbound.get('settings') or {}
+            if not local_listen or not isinstance(options, dict) or set(options) - {'auth','accounts','udp','ip'} or inbound.get('sniffing'):
+                raise AtlasError('Параметры SOCKS-входа Xray не поддерживаются')
+            users, accounts = server.get('users') or [], options.get('accounts') or []
+            if options.get('auth', 'noauth') == 'password':
+                if not isinstance(users, list) or not isinstance(accounts, list) or not any(isinstance(u, dict) and isinstance(a, dict) and isinstance(u.get('user'), str) and u['user'] and isinstance(u.get('pass'), str) and u['pass'] and u['user'] == a.get('user') and u['pass'] == a.get('pass') for u in users for a in accounts):
+                    raise AtlasError('Авторизация внутреннего SOCKS Xray не совпадает')
+            elif options.get('auth', 'noauth') != 'noauth' or users:
+                raise AtlasError('Авторизация SOCKS Xray не поддерживается')
+            return descend('inbound', inbound.get('tag'), visited)
+        if kind == 'vless':
+            stream = item.get('streamSettings') or {}
+            sock = stream.get('sockopt') or {}
+            proxy = item.get('proxySettings') or {}
+            if not isinstance(stream, dict) or not isinstance(sock, dict) or not isinstance(proxy, dict) or set(sock) - {'dialerProxy'} or set(proxy) - {'tag'}:
+                raise AtlasError('Параметры цепочки Xray не поддерживаются')
+            a, b = sock.get('dialerProxy'), proxy.get('tag')
+            if a and b and a != b: raise AtlasError('Неоднозначная цепочка Xray')
+            clean = copy.deepcopy(item)
+            clean.pop('proxySettings', None)
+            if clean.get('streamSettings'):
+                clean['streamSettings'].pop('sockopt', None)
+            node = _parse_xray_subscription([{'name':'Hop', 'outbounds':[clean]}])['nodes'][0]
+            ref = a or b
+            if ref:
+                return [[node['outbound']] + tail for tail in descend('outbound', ref, visited)]
+            return [[node['outbound']]]
+        raise AtlasError('Небезопасный или неподдерживаемый выход цепочки Xray')
+    stream = root.get('streamSettings') or {}
+    sock, proxy = stream.get('sockopt') or {}, root.get('proxySettings') or {}
+    if not isinstance(stream, dict) or not isinstance(sock, dict) or not isinstance(proxy, dict) or set(sock) - {'dialerProxy'} or set(proxy) - {'tag'}:
+        raise AtlasError('Параметры цепочки Xray не поддерживаются')
+    a, b = sock.get('dialerProxy'), proxy.get('tag')
+    if a and b and a != b: raise AtlasError('Неоднозначная цепочка Xray')
+    paths = descend('outbound', a or b, set())
+    if len(paths) > 32 or any(not p or len(p) > 4 for p in paths):
+        raise AtlasError('Слишком много переходов в цепочке Xray')
+    return paths, ipv4_only
+
+
+def _parse_xray_subscription(configs):
+    """Import independent VLESS variants and supported fail-closed chains."""
+    nodes, seen, aliases, chained, unsupported, mux_disabled = [], set(), set(), 0, 0, 0
+    for index, config in enumerate(configs):
+        if not isinstance(config, dict) or not isinstance(config.get('outbounds'), list):
+            raise AtlasError('Некорректный список конфигураций Xray')
+        outbounds = config['outbounds']
+        if len(outbounds) > MAX_NODES:
+            raise AtlasError('Слишком много подключений в конфигурации Xray')
+        title = text(config.get('remarks') or config.get('name') or ('Профиль %d' % (index + 1)), 130)
+        for item in outbounds:
+            if not isinstance(item, dict):
+                unsupported += 1
+                continue
+            kind = item.get('protocol')
+            if kind in ('freedom', 'blackhole', 'dns', 'loopback'):
+                continue
+            if kind == 'socks':
+                servers = (item.get('settings') or {}).get('servers') or []
+                if isinstance(servers, list) and len(servers) == 1 and isinstance(servers[0], dict):
+                    server = servers[0]
+                    try: local = ipaddress.ip_address(server.get('address', '')).is_loopback
+                    except ValueError: local = server.get('address') == 'localhost'
+                    if local and any(isinstance(x, dict) and x.get('protocol') == 'socks' and str(x.get('port')) == str(server.get('port')) for x in config.get('inbounds', [])):
+                        continue  # Internal infrastructure, not a selectable profile.
+            try:
+                if kind != 'vless':
+                    raise AtlasError('Неподдерживаемый протокол Xray')
+                stream = item.get('streamSettings') or {}
+                settings = item.get('settings') or {}
+                mux = item.get('mux') or {}
+                if not all(isinstance(x, dict) for x in (stream, settings, mux)):
+                    raise AtlasError('Некорректные настройки Xray')
+                sockopt = stream.get('sockopt') or {}
+                proxy_settings = item.get('proxySettings') or {}
+                if not isinstance(sockopt, dict) or not isinstance(proxy_settings, dict):
+                    raise AtlasError('Некорректная цепочка Xray')
+                if sockopt.get('dialerProxy') or proxy_settings.get('tag'):
+                    try:
+                        paths, ipv4_only = _xray_chain_paths(config, item)
+                        clean = copy.deepcopy(item)
+                        clean.pop('proxySettings', None)
+                        clean['streamSettings'].pop('sockopt', None)
+                        primary = _parse_xray_subscription([{'name':title, 'outbounds':[clean]}])['nodes'][0]
+                        for path_index, path in enumerate(paths):
+                            if not path: continue
+                            identity = {'outbound':primary['outbound'], 'chain':path, 'ipv4_only':ipv4_only}
+                            node_id = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
+                            if node_id in seen: continue
+                            label = title + ' · Цепочка' + (' %d' % (path_index + 1) if len(paths) > 1 else '')
+                            nodes.append({'id':node_id, 'name':text(label, 160), 'outbound':primary['outbound'],
+                                          'chain':path, 'chain_ipv4_only':ipv4_only})
+                            seen.add(node_id)
+                        if not paths: chained += 1
+                    except (AtlasError, ValueError, KeyError, TypeError, AttributeError, OverflowError):
+                        chained += 1
+                    if len(nodes) > MAX_NODES:
+                        raise AtlasError('Больше 512 профилей в одной подписке')
+                    continue
+                # Unknown transport, TLS and connection controls are rejected rather
+                # than silently changing the meaning of a provider's profile.
+                if (set(item) - {'protocol', 'settings', 'streamSettings', 'tag', 'mux'} or
+                    set(settings) - {'vnext'} or
+                    set(stream) - {'network', 'security', 'tlsSettings', 'wsSettings', 'tcpSettings', 'sockopt'} or
+                    set(mux) - {'enabled', 'concurrency', 'xudpConcurrency', 'xudpProxyUDP443'} or
+                    sockopt or proxy_settings or (mux.get('enabled') is not None and type(mux['enabled']) is not bool)):
+                    raise AtlasError('Неподдерживаемые параметры Xray')
+                servers = settings.get('vnext')
+                if not isinstance(servers, list) or len(servers) != 1 or not isinstance(servers[0], dict):
+                    raise AtlasError('Нужен один сервер Xray')
+                server = servers[0]
+                users = server.get('users')
+                if (set(server) - {'address', 'port', 'users'} or not isinstance(users, list) or
+                    len(users) != 1 or not isinstance(users[0], dict)):
+                    raise AtlasError('Некорректный пользователь Xray')
+                user = users[0]
+                if set(user) - {'id', 'encryption', 'flow', 'level'} or user.get('encryption', 'none') not in ('', 'none'):
+                    raise AtlasError('Неподдерживаемое шифрование VLESS')
+                raw = {'type': 'vless', 'server': server.get('address'),
+                       'server_port': server.get('port'), 'uuid': user.get('id')}
+                if user.get('flow'):
+                    raw['flow'] = user['flow']
+                security = stream.get('security', 'none')
+                if security == 'tls':
+                    tls = stream.get('tlsSettings') or {}
+                    if not isinstance(tls, dict) or set(tls) - {'serverName', 'fingerprint', 'alpn', 'enableSessionResumption', 'allowInsecure'} or tls.get('allowInsecure') not in (False, None):
+                        raise AtlasError('Неподдерживаемые параметры TLS Xray')
+                    raw['tls'] = {'enabled': True}
+                    if tls.get('serverName'): raw['tls']['server_name'] = tls['serverName']
+                    if tls.get('fingerprint'): raw['tls']['utls'] = {'enabled': True, 'fingerprint': tls['fingerprint']}
+                    if tls.get('alpn'): raw['tls']['alpn'] = tls['alpn']
+                elif security not in ('', 'none') or stream.get('tlsSettings'):
+                    raise AtlasError('Неподдерживаемая защита Xray')
+                network = stream.get('network', 'tcp')
+                if network in ('tcp', 'raw', ''):
+                    tcp = stream.get('tcpSettings') or {}
+                    if not isinstance(tcp, dict) or set(tcp) - {'header'} or not isinstance(tcp.get('header', {}), dict) or tcp.get('header', {}).get('type', 'none') not in ('', 'none'):
+                        raise AtlasError('Неподдерживаемый TCP Xray')
+                    suffix = 'TCP'
+                elif network == 'ws':
+                    ws = stream.get('wsSettings') or {}
+                    if not isinstance(ws, dict) or set(ws) - {'headers', 'host', 'path'}:
+                        raise AtlasError('Неподдерживаемый WebSocket Xray')
+                    headers = ws.get('headers') or {}
+                    if not isinstance(headers, dict):
+                        raise AtlasError('Некорректные заголовки WebSocket')
+                    headers = dict(headers)
+                    host_keys = [k for k in headers if isinstance(k, str) and k.lower() == 'host']
+                    if len(host_keys) > 1 or (host_keys and ws.get('host') and headers[host_keys[0]] != ws['host']):
+                        raise AtlasError('Разные имена Host в WebSocket')
+                    if ws.get('host') and not host_keys: headers['Host'] = ws['host']
+                    raw['transport'] = {'type': 'ws', 'path': ws.get('path') or '/', 'headers': headers}
+                    suffix = 'WebSocket'
+                else:
+                    raise AtlasError('Неподдерживаемый транспорт Xray')
+                node = normalize(raw, title + ' · ' + suffix)
+                alias = (node['id'], title)
+                if node['id'] in seen and alias not in aliases:
+                    identity = {'outbound':node['outbound'], 'source_name':title, 'variant':suffix}
+                    node['id'] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
+                if node['id'] not in seen:
+                    nodes.append(node)
+                    seen.add(node['id'])
+                    if mux.get('enabled') is True:
+                        mux_disabled += 1
+                aliases.add(alias)
+            except (AtlasError, ValueError, KeyError, TypeError, AttributeError, OverflowError):
+                unsupported += 1
+            if len(nodes) > MAX_NODES:
+                raise AtlasError('Больше 512 профилей в одной подписке')
+    if not nodes:
+        raise AtlasError('В подписке Xray нет поддерживаемых независимых профилей; прежние профили сохранены')
+    warnings = []
+    if chained: warnings.append('Цепочки подключений пока не импортированы: %d' % chained)
+    if mux_disabled: warnings.append('Профили Xray добавлены без мультиплексирования: %d' % mux_disabled)
+    if unsupported: warnings.append('Некоторые служебные или неподдерживаемые подключения Xray пропущены: %d' % unsupported)
+    return {'nodes': nodes, 'warnings': warnings, 'format': 'Xray JSON'}
+
+
 def parse_subscription(body, trusted_json=False):
     if not body or len(body) > MAX_BYTES:
         raise AtlasError('Пустая подписка или размер больше 4 МиБ')
@@ -754,6 +1031,10 @@ def parse_subscription(body, trusted_json=False):
             obj = json.loads(value)
         except ValueError as exc:
             raise AtlasError('Некорректный JSON') from exc
+        configs = obj if isinstance(obj, list) else [obj]
+        if configs and all(isinstance(x, dict) and isinstance(x.get('outbounds'), list) for x in configs) and any(
+                isinstance(o, dict) and 'protocol' in o for x in configs for o in x['outbounds']):
+            return _parse_xray_subscription(configs)
         items = obj.get('outbounds', []) if isinstance(obj, dict) else obj
         if not isinstance(items, list):
             raise AtlasError('Нужен список outbounds')
@@ -792,7 +1073,7 @@ def defaults():
         'bootstrap_dns_sni': 'cloudflare-dns.com', 'bootstrap_dns_path': '/dns-query',
         'udp_over_tcp': False, 'udp_over_tcp_version': 2,
         'interface_monitoring': False, 'monitored_interfaces': [], 'interface_reload_delay_ms': 2000, 'default_interface': '', 'log_level': 'warn',
-        'dns_filter': 'cloudflare', 'fakeip': False, 'direct_fakeip_doh': False, 'fakeip_ttl_seconds': 60, 'resolve_real_ip': False, 'browser_diagnostics': False, 'yacd_enabled': False, 'yacd_wan': False, 'yacd_listen': '127.0.0.1', 'blocked_domains': [], 'max_active_nodes': 2048,
+        'dns_filter': 'cloudflare', 'fakeip': False, 'direct_fakeip_doh': False, 'dns_fallback_direct_doh': False, 'fakeip_ttl_seconds': 60, 'resolve_real_ip': False, 'browser_diagnostics': False, 'yacd_enabled': False, 'yacd_wan': False, 'yacd_listen': '127.0.0.1', 'blocked_domains': [], 'max_active_nodes': 2048,
         'routing_excluded_ips': [], 'routed_source_ips': [], 'capture_interfaces': [], 'sections': [], 'disable_quic': False, 'exclude_ntp': False,
         'kill_switch': False,
         'custom_dns_type': 'https', 'custom_dns_server': '', 'custom_dns_sni': '', 'custom_dns_path': '/dns-query',
@@ -876,6 +1157,10 @@ def validate_settings(data):
         raise AtlasError('Некорректный флаг FakeIP')
     if type(result['direct_fakeip_doh']) is not bool:
         raise AtlasError('Некорректный режим FakeIP для прямых сайтов')
+    if type(result['dns_fallback_direct_doh']) is not bool:
+        raise AtlasError('Некорректный режим резервного DNS')
+    if result['dns_fallback_direct_doh'] and result['dns_filter'] == 'custom' and result['custom_dns_type'] != 'https':
+        raise AtlasError('Резервный DNS требует DNS через HTTPS (DoH)')
     if result['direct_fakeip_doh'] and not result['fakeip']:
         raise AtlasError('Для прямого FakeIP включите FakeIP')
     if result['direct_fakeip_doh'] and result['dns_filter'] == 'custom' and result['custom_dns_type'] != 'https':
@@ -1542,21 +1827,49 @@ def fakeip_record_rules(rules):
 def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=None):
     settings = validate_settings(state['settings'])
     settings['sections'] = [x for x in settings['sections'] if x['enabled']]
-    if not probe_node and not all_nodes(state) and (any(x['outbound_config'] or x['policy'] != 'proxy' for x in settings['sections']) or any(x['enabled'] for x in settings['remote_lists'])):
+    no_profiles = not probe_node and not all_nodes(state)
+    if no_profiles and (settings['dns_fallback_direct_doh'] or any(x['outbound_config'] or x['policy'] != 'proxy' for x in settings['sections']) or any(x['enabled'] for x in settings['remote_lists'])):
         # No implicit direct fallback for the main proxy when only expert sections exist.
         nodes = [{'id': 'local-only-block', 'outbound': {'type': 'block'}}]
     else:
         nodes = [probe_node] if probe_node else selection_nodes(dict(state, settings=settings), validated=True)
     nodes = list({n.get('key', n['id']): n for n in nodes}.values())
-    outs = []
+    if sum(1 + len(n.get('chain', [])) for n in nodes if isinstance(n.get('chain', []), list)) > MAX_TOTAL_NODES:
+        raise AtlasError('Слишком много выходов и переходов цепочек в активном пуле')
+    outs, tags = [], []
     for n in nodes:
         out = copy.deepcopy(n['outbound'])
         out['tag'] = n.get('key', n['id'])
+        tags.append(out['tag'])
         if settings['udp_over_tcp'] and out.get('type') in ('shadowsocks','socks'):
             out['udp_over_tcp'] = {'enabled': True, 'version': settings['udp_over_tcp_version']}
         outs.append(out)
-    tags = [o['tag'] for o in outs]
-    selected = settings['selected'] if not probe_node else tags[0]
+        chain = n.get('chain', [])
+        ipv4_only = n.get('chain_ipv4_only', False)
+        if not isinstance(chain, list) or len(chain) > 4 or type(ipv4_only) is not bool or (ipv4_only and not chain):
+            raise AtlasError('Некорректная цепочка профиля')
+        if chain:
+            if out.get('type') != 'vless' or out.get('detour'):
+                raise AtlasError('Некорректный основной выход цепочки')
+            if ipv4_only:
+                try:
+                    address = ipaddress.ip_address(out['server'])
+                except ValueError:
+                    address = None
+                if address is not None and address.version != 4:
+                    raise AtlasError('Цепочка требует IPv4 адрес сервера')
+                if address is None:
+                    out['domain_resolver'] = {'server':'bootstrap', 'strategy':'ipv4_only'}
+            hop_tags = ['atlas-hop-' + out['tag'] + '-' + str(index) for index in range(len(chain))]
+            out['detour'] = hop_tags[0]
+            for index, raw in enumerate(chain):
+                if not isinstance(raw, dict) or raw.get('type') != 'vless':
+                    raise AtlasError('Поддерживаются только VLESS переходы цепочки')
+                hop = normalize(raw)['outbound']
+                hop['tag'] = hop_tags[index]
+                if index + 1 < len(hop_tags): hop['detour'] = hop_tags[index + 1]
+                outs.append(hop)
+    selected = ('auto' if no_profiles and settings['dns_fallback_direct_doh'] else settings['selected']) if not probe_node else tags[0]
     if selected != 'auto' and selected not in tags:
         raise AtlasError('Выбранный сервер отсутствует. Выберите другой или Авто.')
     custom = custom_auto_policy(settings) and not probe_node
@@ -1579,13 +1892,15 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         needed_pools.add(settings['fetch_lists_subscription'])
     for sub_id in sorted(needed_pools):
         sub = enabled_subs.get(sub_id)
-        if not sub:
+        if not sub and not (no_profiles and settings['dns_fallback_direct_doh']):
             raise AtlasError('Секция ссылается на отсутствующую или выключенную подписку')
         members = [n for n in nodes if n.get('key','').startswith(sub_id)]
+        if not members and no_profiles and settings['dns_fallback_direct_doh']:
+            members = nodes
         if not members:
             raise AtlasError('Фильтры исключили все профили пула в одной из секций')
         pool_tag, auto_tag = 'pool_' + sub_id, 'auto_' + sub_id
-        member_tags = [n['key'] for n in members]
+        member_tags = [n.get('key', n['id']) for n in members]
         outs.extend([{'type': 'selector', 'tag': pool_tag, 'outbounds': [auto_tag, 'policy-block'] + member_tags,
                       'default': 'policy-block' if custom else auto_tag,
                       'interrupt_exist_connections': settings['interrupt_connections'] or custom},
@@ -1627,6 +1942,8 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
             target = (pool_tags[section['pool']] if section['pool'] else 'proxy') if section['policy'] == 'proxy' else interface_tags[section['interface']] if section['policy'] == 'interface' else 'direct'
             if section['policy']=='proxy' and (section.get('pools') is not None or section.get('site_checks') or section['urltest_fallbacks'] or section['urltest_download_check']!='default' or any(section[k] is not None if k!='urltest_url' else bool(section[k]) for k in ('auto_interval_seconds','auto_tolerance_ms','urltest_url')) or any(section[k] is not None for k in ('udp_over_tcp','udp_over_tcp_version'))):
                 members=[tag for tag in tags if (not section.get('pools') or tag[:16] in section['pools']) and (not section['pool'] or tag.startswith(section['pool']))]
+                if not members and no_profiles and settings['dns_fallback_direct_doh']:
+                    members = tags[:]
                 if not members:raise AtlasError('В выбранных подписках секции нет допущенных профилей')
                 prefix = section_node_prefix(section, settings)
                 if prefix:
@@ -1928,6 +2245,20 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         secure_dns = {'type': 'https', 'tag': 'secure', 'server': '1.1.1.1',
                       'path': '/dns-query', 'tls': {'enabled': True, 'server_name': 'cloudflare-dns.com'},
                       'detour': default_dns_outbound}
+    if settings['dns_fallback_direct_doh'] and not probe_node and default_dns_outbound == 'proxy':
+        supported = features if features is not None else engine_features.capabilities()
+        if not {'urltest.fallbacks', 'urltest.background'}.issubset(supported):
+            raise AtlasError('Резервный DNS требует движок Atlas с поддержкой резервных выходов')
+        # Only DNS may use this group: ordinary proxy traffic remains on proxy.
+        # The health check reaches the configured DoH service via each path.
+        doh_host = secure_dns['tls']['server_name']
+        if ':' in doh_host and not doh_host.startswith('['):
+            doh_host = '[' + doh_host + ']'
+        outs.extend([{'type': 'direct', 'tag': 'atlas-dns-direct', 'domain_resolver': 'bootstrap'},
+                     {'type': 'urltest', 'tag': 'atlas-dns-fallback', 'outbounds': ['proxy'],
+                      'fallbacks': ['atlas-dns-direct'], 'url': 'https://' + doh_host + secure_dns['path'],
+                      'interval': '10s', 'background': True}])
+        secure_dns['detour'] = 'atlas-dns-fallback'
     dns_servers.append(secure_dns)
     if settings['direct_fakeip_doh'] and not probe_node:
         # Explicit direct destinations use the same authenticated DoH service,

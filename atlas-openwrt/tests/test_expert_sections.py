@@ -152,6 +152,21 @@ class ExpertGraphs(unittest.TestCase):
 
 
 class Backups(unittest.TestCase):
+    def test_subscription_chain_survives_restore_and_rejects_unsafe_hops(self):
+        state = core.defaults()
+        root = core.uri_node('vless://11111111-1111-4111-8111-111111111111@exit.example:443#chain')
+        hop = core.uri_node('vless://22222222-2222-4222-8222-222222222222@cdn.example:443?type=ws#hop')['outbound']
+        root.update(chain=[hop], chain_ipv4_only=True)
+        state['subscriptions'] = [{'id':'b'*16,'name':'Test','enabled':True,'source':'remote',
+                                   'url':'https://example.com/sub','nodes':[root]}]
+        backup = make_backup(state)
+        restored = restore_state(json.dumps(backup))
+        self.assertEqual(restored['subscriptions'][0]['nodes'][0]['chain'],[hop])
+        self.assertTrue(restored['subscriptions'][0]['nodes'][0]['chain_ipv4_only'])
+        unsafe = copy.deepcopy(backup)
+        unsafe['state']['subscriptions'][0]['nodes'][0]['chain'][0]['detour'] = 'direct'
+        with self.assertRaises(core.AtlasError): restore_state(json.dumps(unsafe))
+
     def test_local_advanced_profile_survives_backup_restore(self):
         state=sample()
         state['subscriptions'][0]['nodes'][0]['outbound']['multiplex']={'enabled':True}

@@ -2400,6 +2400,7 @@ def dispatch(method, args):
         elif method == 'save_subscription':
             sub_id = args.get('id', '')
             name = text(args.get('name', '').strip(), 80)
+            happ_link = isinstance(args.get('url'), str) and args['url'].startswith('happ://crypt5/')
             if not name:
                 raise AtlasError('Введите название')
             if type(args.get('enabled', True)) is not bool:
@@ -2421,6 +2422,7 @@ def dispatch(method, args):
                     raise AtlasError('Максимум %d подписок' % MAX_SUBSCRIPTIONS)
                 sub = {'id': secrets.token_hex(8), 'nodes': []}
                 current['subscriptions'].append(sub)
+            old_headers = dict(sub.get('headers', {}))
             if args.get('url'):
                 new_url = subscription_url(args['url'])
                 if sub.get('url') != new_url:
@@ -2441,6 +2443,15 @@ def dispatch(method, args):
                 sub['headers'] = {}
             else:
                 sub.setdefault('headers', {})
+            if happ_link and not any(key.lower() == 'user-agent' for key in sub['headers']):
+                # Happ-aware providers may return a richer Xray configuration
+                # instead of the plain links served to generic clients.
+                sub['headers']['User-Agent'] = 'Happ/4.6.0'
+            if sub['headers'] != old_headers:
+                # HTTP validators belong to the representation requested with
+                # the previous headers, not the new client identity.
+                sub['etag'] = ''
+                sub['last_modified'] = ''
             sub.update(name=name, enabled=args.get('enabled', True))
         elif method == 'import_subscriptions':
             items = args.get('items')
@@ -2466,8 +2477,9 @@ def dispatch(method, args):
                     if len(current['subscriptions']) >= MAX_SUBSCRIPTIONS:
                         results.append({'line': index + 1, 'name': name, 'status': 'error', 'message': 'Достигнут предел 64 подписки'})
                         continue
+                    headers = {'User-Agent': 'Happ/4.6.0'} if item['url'].startswith('happ://crypt5/') else {}
                     sub = {'id': secrets.token_hex(8), 'name': name, 'url': url, 'enabled': True, 'nodes': [],
-                           'updated': 0, 'metadata': {}, 'error': '', 'warnings': [], 'headers': {}}
+                           'updated': 0, 'metadata': {}, 'error': '', 'warnings': [], 'headers': headers}
                     current['subscriptions'].append(sub)
                     known.add(url)
                     results.append({'line': index + 1, 'name': name, 'status': 'added', 'id': sub['id']})

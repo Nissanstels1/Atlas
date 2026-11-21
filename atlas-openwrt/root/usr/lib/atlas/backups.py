@@ -3,7 +3,7 @@ import copy
 import json
 import re
 from core import (AtlasError, MAX_SUBSCRIPTIONS, MAX_NODES, MAX_TOTAL_NODES,
-                  defaults, normalize_custom, normalize_editor_node, subscription_url,
+                  defaults, normalize, normalize_custom, normalize_editor_node, subscription_url,
                   subscription_headers, text, validate_settings)
 
 MAX_BACKUP_BYTES = 16 * 1024 * 1024
@@ -57,11 +57,25 @@ def restore_state(content):
                 clean = (normalize_editor_node if local else normalize_custom)(node.get('outbound'), node.get('name'))
             except (ValueError, TypeError, KeyError, AttributeError):
                 raise AtlasError('Некорректный профиль в резервной копии') from None
+            chain = node.get('chain', [])
+            ipv4_only = node.get('chain_ipv4_only', False)
+            if not isinstance(chain, list) or len(chain) > 4 or type(ipv4_only) is not bool or (ipv4_only and not chain):
+                raise AtlasError('Некорректная цепочка в резервной копии')
+            if chain:
+                if clean['outbound']['type'] != 'vless':
+                    raise AtlasError('Некорректный основной выход цепочки')
+                try:
+                    if any(not isinstance(hop, dict) or hop.get('type') != 'vless' for hop in chain):
+                        raise AtlasError('Поддерживаются только VLESS переходы цепочки')
+                    clean['chain'] = [normalize(hop)['outbound'] for hop in chain]
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    raise AtlasError('Некорректная цепочка в резервной копии') from None
+                clean['chain_ipv4_only'] = ipv4_only
             # Preserve selection keys. Geolocation evidence must be measured anew.
             clean['id'] = node['id']
             node_ids.add(clean['id'])
             rebuilt.append(clean)
-        count += len(rebuilt)
+        count += len(rebuilt) + sum(len(node.get('chain', [])) for node in rebuilt)
         if count > MAX_TOTAL_NODES:
             raise AtlasError('Резервная копия содержит более 4096 профилей')
         state['subscriptions'].append({'id': source['id'], 'name': name, 'url': url,

@@ -554,6 +554,25 @@ class Persistence(unittest.TestCase):
         atlas.dispatch('save_subscription',{'id':'b'*16,'name':'Test','url':'https://other.example/sub','enabled':True})
         self.assertEqual(atlas.state()['subscriptions'][0]['headers'],{})
 
+    def test_happ_subscription_uses_compatible_agent_without_overriding_a_custom_agent(self):
+        current = atlas.state()
+        current['subscriptions'][0].update(etag='old', last_modified='old')
+        atlas.atomic(atlas.STATE, current)
+        with mock.patch.object(atlas, 'subscription_url', return_value='https://example.com/sub/private'):
+            atlas.dispatch('save_subscription', {'id':'b'*16, 'name':'Test', 'url':'happ://crypt5/fixture', 'enabled':True})
+            saved = atlas.state()['subscriptions'][0]
+            self.assertEqual(saved['headers']['User-Agent'], 'Happ/4.6.0')
+            self.assertEqual((saved['etag'], saved['last_modified']), ('', ''))
+            atlas.dispatch('save_subscription', {'id':'b'*16, 'name':'Test', 'url':'happ://crypt5/fixture',
+                           'enabled':True, 'headers':'User-Agent: MyClient/1'})
+            self.assertEqual(atlas.state()['subscriptions'][0]['headers']['User-Agent'], 'MyClient/1')
+
+    def test_batch_happ_subscription_gets_compatible_agent(self):
+        with mock.patch.object(atlas, 'subscription_url', return_value='https://new.example/sub'):
+            result = atlas.dispatch('import_subscriptions', {'items':[{'name':'Happ', 'url':'happ://crypt5/fixture'}]})
+        self.assertEqual(result['added'], 1)
+        self.assertEqual(atlas.state()['subscriptions'][-1]['headers']['User-Agent'], 'Happ/4.6.0')
+
     def test_batch_import_adds_valid_urls_deduplicates_and_reports_errors(self):
         result=atlas.dispatch('import_subscriptions',{'items':[
             {'name':'Duplicate','url':'https://example.com/sub/private'},
