@@ -2926,7 +2926,9 @@ def supervise_engine():
                         return {'mode':'inactive'}
                     return latest
                 verifier=atlas_verifier(adaptive_settings,listener['listen_port'],user['username'],user['password'])
-                adaptive_worker=AdaptiveWorker(RUN/'adaptive-rules.json',adaptive_settings,verifier,suppressed=adaptive_suppressed)
+                stalled_verifier=atlas_verifier(adaptive_settings,listener['listen_port'],user['username'],user['password'],require_direct_failure=True)
+                adaptive_worker=AdaptiveWorker(RUN/'adaptive-rules.json',adaptive_settings,verifier,suppressed=adaptive_suppressed,
+                    connection_snapshot=lambda:clash_request('GET','/connections',timeout=2),stall_verifier=stalled_verifier)
         dns_inbound=next((x for x in config.get('inbounds',[]) if x.get('tag')=='dhcp-dns'),None)
         if current['settings']['dhcp_dns_enabled'] and not dns_inbound:
             raise AtlasError('В конфигурации отсутствует DNS для dnsmasq')

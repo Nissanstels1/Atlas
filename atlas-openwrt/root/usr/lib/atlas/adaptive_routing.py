@@ -1,8 +1,7 @@
-"""Experimental, opt-in policy; not wired into the Atlas service.
+"""Experimental opt-in policy for temporary, verified proxy routes.
 
-This module intentionally accepts only direct HTTPS dial failures with an
-identified hostname and installs a temporary exact-domain rule only after an
-independent, caller-supplied tunnel probe succeeds.
+The policy considers explicit direct dial failures and observed stalled HTTPS
+connections; any temporary exact-domain route requires a verified tunnel.
 """
 from collections import OrderedDict, deque
 import base64
@@ -18,6 +17,7 @@ import socket
 import ssl
 import struct
 import tempfile
+import subprocess
 import threading
 import time
 
@@ -93,6 +93,46 @@ class FailureObserver:
         fake=ip.version==4 and ip in ipaddress.ip_network('198.18.0.0/15')
         if (not ip.is_global or ip.is_multicast) and not (fake and self.settings().get('fakeip')):return None
         return previous[0],str(ip)
+
+
+class StalledConnectionObserver:
+    """Track bounded direct TLS candidates that have sent bytes but received none."""
+    def __init__(self, *, now=time.monotonic, wait=4, maximum=512):
+        self.now,self.wait,self.maximum=now,wait,maximum
+        self.pending=OrderedDict()
+
+    def observe(self, snapshot):
+        if not isinstance(snapshot,dict) or not isinstance(snapshot.get('connections'),list):
+            return []
+        now=self.now();seen=set();events=[]
+        for connection in snapshot['connections'][:2048]:
+            if not isinstance(connection,dict):continue
+            identity=connection.get('id');meta=connection.get('metadata');chains=connection.get('chains')
+            if not isinstance(identity,str) or not 1<=len(identity)<=128 or not isinstance(meta,dict) or not isinstance(chains,list):continue
+            host=meta.get('host');port=meta.get('destinationPort');network=meta.get('network')
+            sent=connection.get('upload');received=connection.get('download')
+            if (not isinstance(host,str) or not isinstance(network,str) or network.lower()!='tcp' or str(port)!='443'
+                or len(chains)!=1 or not isinstance(chains[0],str) or chains[0].lower()!='direct'
+                or type(sent) is not int or not 0<sent<=65536 or type(received) is not int or received!=0):continue
+            host=host.lower().rstrip('.')
+            if not failed_hostname('connection: open connection to '+host+':443 using outbound/direct[direct]: x'):continue
+            address=meta.get('destinationIP')
+            try:
+                parsed=ipaddress.ip_address(address)
+                fake=parsed.version==4 and parsed in ipaddress.ip_network('198.18.0.0/15')
+                if parsed.version!=4 or parsed.is_multicast or (not parsed.is_global and not fake):continue
+                address=str(parsed)
+            except (ValueError,TypeError):address=None
+            seen.add(identity);old=self.pending.get(identity)
+            if old is None or old[0]!=host or old[1]!=address:
+                self.pending[identity]=(host,address,now,False)
+            elif not old[3] and now-old[2]>=self.wait:
+                self.pending[identity]=(host,address,old[2],True);events.append((host,address))
+            self.pending.move_to_end(identity)
+            while len(self.pending)>self.maximum:self.pending.popitem(last=False)
+        for identity in list(self.pending):
+            if identity not in seen:self.pending.pop(identity,None)
+        return events
 
 
 def matches(host, suffixes):
@@ -210,6 +250,48 @@ def proxy_connect(proxy_port, username, password, address, timeout):
         raise
 
 
+def doh_http2(query, proxy_port, username, password, server, sni, path, timeout):
+    """Ask the same resolver through the same proxy; secrets stay off argv."""
+    try:
+        ip=ipaddress.ip_address(server)
+        if not ip.is_global or ip.is_multicast or (ip.version==6 and ip.ipv4_mapped):return b''
+        if not DOM.fullmatch(sni) or not path.startswith('/') or any(c in path for c in '\r\n \t'):
+            return b''
+        if not 1<=proxy_port<=65535 or any(not re.fullmatch(r'[A-Za-z0-9_-]{1,128}',x) for x in (username,password)):
+            return b''
+        curl=next((p for p in ('/usr/bin/curl','/bin/curl') if os.path.isfile(p) and os.access(p,os.X_OK)),None)
+        if not curl:return b''
+        address='['+str(ip)+']' if ip.version==6 else str(ip)
+        quote=lambda x:json.dumps(str(x),ensure_ascii=True)
+        marker=b'ATLAS_DOH_META:'
+        options=['silent','show-error','http2','proto = "=https"','max-filesize = 65535',
+            'max-time = '+str(max(1,min(12,int(timeout)))), 'noproxy = ""',
+            'proxy = '+quote('http://127.0.0.1:'+str(proxy_port)),
+            'proxy-user = '+quote(username+':'+password),
+            'connect-to = '+quote(sni+':443:'+address+':443'),
+            'header = "Content-Type: application/dns-message"',
+            'header = "Accept: application/dns-message"',
+            'data-binary = "@-"', 'write-out = "ATLAS_DOH_META:%{http_code}:%{content_type}"',
+            'url = '+quote('https://'+sni+path)]
+        config=('\n'.join(options)+'\n').encode('ascii')
+        if len(config)>3000:return b''
+        read_fd,write_fd=os.pipe()
+        try:
+            os.write(write_fd,config);os.close(write_fd);write_fd=None
+            result=subprocess.run([curl,'-q','--config','/proc/self/fd/'+str(read_fd)],input=query,
+                                  pass_fds=(read_fd,),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                                  timeout=max(2,min(14,timeout+2)),env={'PATH':'/usr/bin:/bin'})
+        finally:
+            os.close(read_fd)
+            if write_fd is not None:os.close(write_fd)
+        body,sep,metadata=result.stdout.rpartition(marker)
+        code,_,mime=metadata.partition(b':')
+        if result.returncode or not sep or code!=b'200' or mime.split(b';',1)[0].strip().lower()!=b'application/dns-message' or len(body)>65535:return b''
+        return body
+    except (OSError,ValueError,TypeError,UnicodeError,subprocess.SubprocessError):
+        return b''
+
+
 def tunnel_dns_a(host, proxy_port, username, password, *, server='1.1.1.1',
                  sni='cloudflare-dns.com', path='/dns-query', timeout=4, context=None):
     """Resolve through the tunnel using authenticated DNS-over-HTTPS only."""
@@ -225,6 +307,9 @@ def tunnel_dns_a(host, proxy_port, username, password, *, server='1.1.1.1',
                         'Accept: application/dns-message\r\nContent-Length: '+str(len(query))+'\r\nConnection: close\r\n\r\n').encode('ascii')
                 tls.sendall(header+query)
                 response=http.client.HTTPResponse(tls);response.begin()
+                if response.status in (426,505):
+                    body=doh_http2(query,proxy_port,username,password,server,sni,path,timeout)
+                    return dns_public_addresses(body,identity,query) if body else []
                 if response.status!=200 or response.getheader('Content-Type','').split(';')[0].strip().lower()!='application/dns-message':return []
                 body=response.read(65536)
                 return dns_public_addresses(body,identity,query)
@@ -252,7 +337,20 @@ def tunnel_tls_probe(host, address, proxy_port, username, password, timeout=4, *
         return False
 
 
-def atlas_verifier(settings, proxy_port, username, password):
+def direct_tls_probe(host, address, timeout=3, *, context=None):
+    """Test a public IP directly without sending a page request."""
+    try:
+        ip=ipaddress.ip_address(address)
+        if ip.version!=4 or not ip.is_global or ip.is_multicast or not DOM.fullmatch(host):return False
+        context=context or ssl.create_default_context()
+        if context.verify_mode!=ssl.CERT_REQUIRED or not context.check_hostname:return False
+        with socket.create_connection((str(ip),443),timeout=timeout) as raw:
+            with context.wrap_socket(raw,server_hostname=host):return True
+    except (OSError,ValueError,TypeError,ssl.SSLError):
+        return False
+
+
+def atlas_verifier(settings, proxy_port, username, password, *, require_direct_failure=False):
     """Prepare a fail-closed probe using the current configured DoH service."""
     def verify(host):
         current=settings()
@@ -267,8 +365,12 @@ def atlas_verifier(settings, proxy_port, username, password):
         current=settings()
         if not may_probe(host,current) or not public_not_excluded(addresses,current.get('bypass_cidrs',[])):
             return False
-        # Bound time and load: use only one public result per candidate.
-        return tunnel_tls_probe(host,addresses[0],proxy_port,username,password)
+        # Two addresses avoid treating a single unavailable CDN endpoint as a
+        # blocked domain. No direct test is needed for explicit dial failures.
+        targets=addresses[:2]
+        if require_direct_failure and any(direct_tls_probe(host,address) for address in targets):
+            return False
+        return any(tunnel_tls_probe(host,address,proxy_port,username,password) for address in targets)
     return verify
 
 
@@ -281,7 +383,7 @@ class AdaptivePolicy:
         self.failures, self.last_probe, self.active = {}, {}, {}
         self.probes = deque()
 
-    def observe(self, line, verify):
+    def observe(self, line, verify, *, minimum_failures=None):
         host = failed_hostname(line)
         if not host or matches(host, self.direct_exclusions):
             return None
@@ -298,7 +400,8 @@ class AdaptivePolicy:
             del self.failures[oldest]
         while self.probes and now-self.probes[0] >= 60:
             self.probes.popleft()
-        if (len(seen) < self.threshold or now-self.last_probe.get(host, -float('inf')) < self.cooldown
+        threshold=self.threshold if minimum_failures is None else minimum_failures
+        if (len(seen) < threshold or now-self.last_probe.get(host, -float('inf')) < self.cooldown
                 or len(self.probes) >= self.max_probes or len(self.active) >= self.maximum):
             return None
         self.probes.append(now)
@@ -347,32 +450,51 @@ class AdaptivePolicy:
 
 class AdaptiveWorker:
     """Bounded event queue; the engine never waits for a connectivity probe."""
-    def __init__(self, path, settings, verifier, *, policy=None, suppressed=lambda: set()):
+    def __init__(self, path, settings, verifier, *, policy=None, suppressed=lambda: set(),
+                 connection_snapshot=None, stall_verifier=None):
         self.path=Path(path)
         self.settings=settings
         self.verifier=verifier
         self.suppressed=suppressed
         self.policy=policy or AdaptivePolicy()
         self.observer=FailureObserver(settings)
+        self.stalls=StalledConnectionObserver()
+        self.connection_snapshot=connection_snapshot
+        self.stall_verifier=stall_verifier
         self.queue=queue.Queue(maxsize=128)
         self.stop=threading.Event()
         self.thread=threading.Thread(target=self.run,daemon=True)
+        self.monitor_thread=None
 
     def offer(self, line):
         try:event=self.observer.event(line)
         except (OSError,ValueError,TypeError):return False
         if not event:return False
-        try:self.queue.put_nowait(event);return True
+        try:self.queue.put_nowait((*event,False));return True
         except queue.Full:return False
 
     def start(self):
         self.policy.write_rules(self.path)
         self.path.with_name('adaptive-status.json').unlink(missing_ok=True)
         self.thread.start()
+        if self.connection_snapshot and self.stall_verifier:
+            self.monitor_thread=threading.Thread(target=self.monitor,daemon=True)
+            self.monitor_thread.start()
 
     def close(self):
         self.stop.set()
+        if self.monitor_thread and self.monitor_thread.ident is not None:self.monitor_thread.join(timeout=3)
         if self.thread.ident is not None:self.thread.join(timeout=12)
+
+    def monitor(self):
+        while not self.stop.wait(2):
+            try:
+                if suspension_reason(self.settings()):continue
+                for host,address in self.stalls.observe(self.connection_snapshot()):
+                    try:self.queue.put_nowait((host,address,True))
+                    except queue.Full:break
+            except (OSError,ValueError,TypeError,RuntimeError,http.client.HTTPException):
+                pass
 
     def run(self):
         try:self._run()
@@ -389,20 +511,22 @@ class AdaptiveWorker:
         next_heartbeat=0
         while not self.stop.is_set():
             try:
-                host,address=self.queue.get(timeout=.25)
+                host,address,stalled=self.queue.get(timeout=.25)
                 current=self.settings()
                 # An IP-specific direct exclusion can only be honored if the
                 # actual direct destination is known and is not a FakeIP.
                 excluded=current.get('bypass_cidrs',[])
                 fake=address and ipaddress.ip_address(address) in ipaddress.ip_network('198.18.0.0/15')
+                if fake and not current.get('fakeip'):continue
                 if excluded and (not address or fake or not public_not_excluded([address],excluded)):
                     continue
                 if host and host not in self.suppressed() and may_probe(host,self.settings()):
                     def verify(name):
-                        return (not self.stop.is_set() and name not in self.suppressed() and may_probe(name,self.settings()) and self.verifier(name)
+                        probe=self.stall_verifier if stalled else self.verifier
+                        return (not self.stop.is_set() and name not in self.suppressed() and may_probe(name,self.settings()) and probe(name)
                                 and not self.stop.is_set() and name not in self.suppressed() and may_probe(name,self.settings()))
                     synthetic='connection: open connection to '+host+':443 using outbound/direct[direct]: observed'
-                    self.policy.observe(synthetic,verify)
+                    self.policy.observe(synthetic,verify,minimum_failures=1 if stalled else None)
             except queue.Empty:pass
             except (OSError,ValueError,TypeError):pass
             if time.monotonic()>=next_refresh:
