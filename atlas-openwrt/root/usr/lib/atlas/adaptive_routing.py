@@ -15,6 +15,7 @@ import re
 import secrets
 import socket
 import ssl
+import stat
 import struct
 import tempfile
 import subprocess
@@ -139,14 +140,97 @@ def matches(host, suffixes):
     return any(host == s or host.endswith('.' + s) for s in suffixes)
 
 
+RULE_SET_DIRECTORY=Path('/etc/atlas/rules')
+_block_list_cache=OrderedDict()
+_block_match_cache=OrderedDict()
+_block_cache_lock=threading.RLock()
+
+
+def _block_list_identity(item):
+    """Only global, cached binary DNS lists can be checked this way."""
+    if (item.get('policy')!='dnsblock' or item.get('section') or item.get('format')!='srs'
+            or not item.get('srs_cached') or not re.fullmatch(r'[a-f0-9]{16}',str(item.get('id','')))):
+        return None
+    path=RULE_SET_DIRECTORY/(item['id']+'.srs')
+    try:
+        info=path.lstat()
+        if not stat.S_ISREG(info.st_mode) or not 0<info.st_size<=131072:return None
+        return (str(path),info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+    except OSError:return None
+
+
+def _domain_only_block_list(item):
+    identity=_block_list_identity(item)
+    if not identity:return None
+    with _block_cache_lock:
+        if identity in _block_list_cache:
+            _block_list_cache.move_to_end(identity)
+            return identity if _block_list_cache[identity] else None
+        valid=False
+        try:
+            from engine_features import binary_path
+            with tempfile.TemporaryDirectory(prefix='atlas-block-check-') as directory:
+                out=Path(directory)/'rules.json'
+                command=['/bin/sh','-c','ulimit -f 8192; exec "$@"','atlas-limit',binary_path(),
+                         'rule-set','decompile','--output',str(out),identity[0]]
+                result=subprocess.run(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                if result.returncode==0 and out.is_file() and out.stat().st_size<=4194304 and _block_list_identity(item)==identity:
+                    data=json.loads(out.read_bytes())
+                    rules=data.get('rules') if isinstance(data,dict) else None
+                    allowed={'domain','domain_suffix','domain_keyword','domain_regex'}
+                    valid=isinstance(rules,list) and bool(rules) and all(
+                        isinstance(rule,dict) and bool(rule) and set(rule)<=allowed for rule in rules)
+                    if valid:
+                        examples=[v for rule in rules for key in ('domain','domain_suffix')
+                                  for v in ([rule[key]] if isinstance(rule.get(key),str) else rule.get(key,[]))
+                                  if isinstance(v,str) and DOM.fullmatch(v)]
+                        valid=False
+                        if examples:
+                            with tempfile.TemporaryFile() as output:
+                                matched=subprocess.run([binary_path(),'rule-set','match','--format','binary',identity[0],examples[0]],
+                                                       stdin=subprocess.DEVNULL,stdout=output,stderr=output,timeout=5)
+                                output.seek(0)
+                                valid=matched.returncode==0 and bool(output.read(1)) and _block_list_identity(item)==identity
+        except (OSError,ValueError,TypeError,subprocess.TimeoutExpired):pass
+        _block_list_cache[identity]=valid
+        while len(_block_list_cache)>8:_block_list_cache.popitem(last=False)
+        return identity if valid else None
+
+
+def _blocked_by_binary_list(host, item):
+    """Fail closed if the engine cannot prove that this name is outside the list."""
+    identity=_domain_only_block_list(item)
+    if not identity:return True
+    now=time.monotonic();key=(identity,host)
+    with _block_cache_lock:
+        cached=_block_match_cache.get(key)
+        if cached and 0<=now-cached[0]<120:
+            _block_match_cache.move_to_end(key)
+            return cached[1]
+        blocked=True
+        try:
+            from engine_features import binary_path
+            with tempfile.TemporaryFile() as output:
+                result=subprocess.run([binary_path(),'rule-set','match','--format','binary',identity[0],host],
+                                      stdin=subprocess.DEVNULL,stdout=output,stderr=output,timeout=5)
+                output.seek(0)
+                blocked=result.returncode!=0 or bool(output.read(1)) or _block_list_identity(item)!=identity
+        except (OSError,ValueError,TypeError,subprocess.TimeoutExpired):pass
+        _block_match_cache[key]=(now,blocked)
+        while len(_block_match_cache)>256:_block_match_cache.popitem(last=False)
+        return blocked
+
+
 def suspension_reason(settings):
     if not isinstance(settings,dict) or settings.get('mode')!='rules':return 'mode'
     if settings.get('routing_excluded_ips'):return 'devices'
     sections={x.get('id'):x for x in settings.get('sections',[]) if isinstance(x,dict)}
     for item in settings.get('remote_lists',[]):
         assigned=sections.get(item.get('section'),{})
-        if item.get('enabled') and (item.get('policy') in ('direct','exclude','block','dnsblock') or assigned.get('policy') in ('direct','exclude','block')):
-            return 'lists'  # A compiled list cannot be classified from its URL.
+        if not item.get('enabled'):continue
+        if item.get('policy')=='dnsblock' and not item.get('section') and _domain_only_block_list(item):continue
+        if item.get('policy') in ('direct','exclude','block','dnsblock') or assigned.get('policy') in ('direct','exclude','block'):
+            return 'lists'  # Unknown or scoped lists remain fail-closed.
     for section in settings.get('sections',[]):
         if not section.get('enabled'):continue
         if section.get('exclude_source_ips') or section.get('exclude_cidrs'):return 'sections'
@@ -167,6 +251,8 @@ def may_probe(host, settings):
                [x for x in (settings.get('custom_dns_sni'),settings.get('bootstrap_dns_sni'),
                             'cloudflare-dns.com','dns.adguard-dns.com') if isinstance(x,str) and x])
     if matches(host, protected):return False
+    for item in settings.get('remote_lists',[]):
+        if item.get('enabled') and item.get('policy')=='dnsblock' and _blocked_by_binary_list(host,item):return False
     for section in settings.get('sections',[]):
         if not section.get('enabled'):continue
         if matches(host, section.get('exclude_domains',[])):return False
