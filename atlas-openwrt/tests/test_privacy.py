@@ -27,7 +27,9 @@ class PrivacyFeatures(unittest.TestCase):
         out = {x['tag']: x for x in c['outbounds']}
         secure = next(x for x in c['dns']['servers'] if x['tag'] == 'secure')
         self.assertEqual(secure['detour'], 'atlas-dns-fallback')
-        self.assertEqual(out['atlas-dns-fallback']['outbounds'], ['proxy'])
+        self.assertEqual(out['atlas-dns-fallback']['outbounds'], ['atlas-dns-proxy'])
+        self.assertEqual(out['atlas-dns-proxy']['outbounds'], ['proxy'])
+        self.assertEqual(out['atlas-dns-proxy']['default'], 'proxy')
         self.assertEqual(out['atlas-dns-fallback']['fallbacks'], ['atlas-dns-direct'])
         self.assertEqual(out['atlas-dns-direct']['domain_resolver'], 'bootstrap')
         self.assertNotIn('atlas-dns-direct', out['proxy']['outbounds'])

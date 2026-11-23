@@ -2311,8 +2311,13 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         doh_host = secure_dns['tls']['server_name']
         if ':' in doh_host and not doh_host.startswith('['):
             doh_host = '[' + doh_host + ']'
+        # Isolate DNS health history from the selected profile's latency. The
+        # engine resolves a selector member to its current outbound when it
+        # stores URLTest results; the extra selector keeps DNS checks keyed to
+        # "proxy" rather than to whichever actual profile proxy currently uses.
         outs.extend([{'type': 'direct', 'tag': 'atlas-dns-direct', 'domain_resolver': 'bootstrap'},
-                     {'type': 'urltest', 'tag': 'atlas-dns-fallback', 'outbounds': ['proxy'],
+                     {'type': 'selector', 'tag': 'atlas-dns-proxy', 'outbounds': ['proxy'], 'default': 'proxy'},
+                     {'type': 'urltest', 'tag': 'atlas-dns-fallback', 'outbounds': ['atlas-dns-proxy'],
                       'fallbacks': ['atlas-dns-direct'], 'url': 'https://' + doh_host + secure_dns['path'],
                       'interval': '10s', 'background': True}])
         secure_dns['detour'] = 'atlas-dns-fallback'
