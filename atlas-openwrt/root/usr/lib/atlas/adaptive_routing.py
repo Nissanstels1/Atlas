@@ -4,6 +4,7 @@ The policy considers explicit direct dial failures and observed stalled HTTPS
 connections; any temporary exact-domain route requires a verified tunnel.
 """
 from collections import OrderedDict, deque
+from concurrent.futures import ThreadPoolExecutor
 import base64
 import http.client
 import ipaddress
@@ -98,7 +99,7 @@ class FailureObserver:
 
 class StalledConnectionObserver:
     """Track bounded direct TLS candidates that have sent bytes but received none."""
-    def __init__(self, *, now=time.monotonic, wait=4, maximum=512):
+    def __init__(self, *, now=time.monotonic, wait=2, maximum=512):
         self.now,self.wait,self.maximum=now,wait,maximum
         self.pending=OrderedDict()
 
@@ -247,6 +248,9 @@ def suspension_reason(settings):
 def may_probe(host, settings):
     """Fail closed where the log lacks the information needed by exclusions."""
     if suspension_reason(settings):return False
+    # The automatic fallback must never infer that Russian public services
+    # should move to a foreign proxy. Explicit user proxy rules still apply.
+    if matches(host.lower().rstrip('.'), ('ru','xn--p1ai')):return False
     protected=(list(settings.get('bypass_domains',[]))+list(settings.get('blocked_domains',[]))+
                [x for x in (settings.get('custom_dns_sni'),settings.get('bootstrap_dns_sni'),
                             'cloudflare-dns.com','dns.adguard-dns.com') if isinstance(x,str) and x])
@@ -454,8 +458,12 @@ def atlas_verifier(settings, proxy_port, username, password, *, require_direct_f
         # Two addresses avoid treating a single unavailable CDN endpoint as a
         # blocked domain. No direct test is needed for explicit dial failures.
         targets=addresses[:2]
-        if require_direct_failure and any(direct_tls_probe(host,address) for address in targets):
-            return False
+        if require_direct_failure:
+            # Try the bounded direct destinations at the same time. Both must
+            # fail before a stalled site can be considered for proxy routing.
+            with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+                direct_results=list(pool.map(lambda address:direct_tls_probe(host,address),targets))
+            if any(direct_results):return False
         return any(tunnel_tls_probe(host,address,proxy_port,username,password) for address in targets)
     return verify
 
@@ -612,7 +620,7 @@ class AdaptiveWorker:
                         return (not self.stop.is_set() and name not in self.suppressed() and may_probe(name,self.settings()) and probe(name)
                                 and not self.stop.is_set() and name not in self.suppressed() and may_probe(name,self.settings()))
                     synthetic='connection: open connection to '+host+':443 using outbound/direct[direct]: observed'
-                    self.policy.observe(synthetic,verify,minimum_failures=1 if stalled else None)
+                    self.policy.observe(synthetic,verify,minimum_failures=1)
             except queue.Empty:pass
             except (OSError,ValueError,TypeError):pass
             if time.monotonic()>=next_refresh:

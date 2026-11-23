@@ -20,6 +20,26 @@ def connection(**overrides):
     return result
 
 class StalledTests(unittest.TestCase):
+    def test_russian_domains_are_never_automatically_probed(self):
+        settings={'mode':'rules','sections':[],'remote_lists':[],'bypass_cidrs':[]}
+        for host in ('gosuslugi.ru','esia.gosuslugi.ru','nalog.ru','xn--80asehdb.xn--p1ai','SUB.GOSUSLUGI.RU.'):
+            with self.subTest(host=host):self.assertFalse(a.may_probe(host,settings))
+        for host in ('ru.example.com','notru.example','example.org'):
+            with self.subTest(host=host):self.assertTrue(a.may_probe(host,settings))
+
+    def test_first_direct_failure_checks_proxy_without_waiting_for_a_repeat(self):
+        settings={'mode':'rules','sections':[],'remote_lists':[],'bypass_cidrs':[]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'rules.json';called=[]
+            worker=a.AdaptiveWorker(path,lambda:settings,lambda h:called.append(h) or True)
+            worker.start()
+            try:
+                worker.queue.put(('rare.example.com','1.1.1.1',False));deadline=time.monotonic()+3
+                while time.monotonic()<deadline and not json.loads(path.read_text())['rules']:time.sleep(.05)
+                self.assertEqual(called,['rare.example.com'])
+                self.assertEqual(json.loads(path.read_text())['rules'],[{'domain':['rare.example.com']}])
+            finally:worker.close()
+
     def test_only_persistent_direct_https_without_received_data_is_considered(self):
         now=[10];observer=a.StalledConnectionObserver(now=lambda:now[0],wait=6)
         snap={'connections':[connection()]}

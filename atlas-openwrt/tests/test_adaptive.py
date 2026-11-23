@@ -19,6 +19,13 @@ from test_core import state_with_node
 
 
 class AdaptiveConfigTests(unittest.TestCase):
+    def test_explicit_proxy_and_block_rules_remain_in_force_for_russian_domains(self):
+        state=state_with_node();state['settings'].update(adaptive_proxy_enabled=True,
+            domains=['user-selected.ru'],blocked_domains=['ads.example.ru'])
+        cfg=core.make_config(state);rules=cfg['route']['rules']
+        self.assertTrue(any(r.get('domain_suffix')==['user-selected.ru'] and r.get('outbound')=='proxy' for r in rules))
+        self.assertTrue(any('ads.example.ru' in r.get('domain_suffix',[]) and r.get('action')=='reject' for r in cfg['dns']['rules']))
+
     def test_disabled_configuration_unchanged(self):
         state=state_with_node();cfg=core.make_config(state)
         self.assertFalse(any(x.get('tag')=='adaptive-probe' for x in cfg['inbounds']))
