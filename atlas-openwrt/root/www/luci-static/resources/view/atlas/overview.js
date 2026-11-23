@@ -85,6 +85,11 @@ function atlasLinkInput(cls,value,placeholder){
 function atlasAdblockMatch(item,preset) {
     return item.policy==='dnsblock' && !item.section && !item.interface && (item.adblock_preset===preset.key || item.url===preset.url);
 }
+function categoryAdsStatsText(data) {
+    var item=((data.settings || {}).remote_lists || []).find(function(x){return x.name==='Реклама: category-ads-all' && x.policy==='dnsblock' && x.format==='srs' && !x.section;});
+    var stat=item && (data.srs_stats || {})[item.id];
+    return stat ? 'В списке: доменные записи — '+stat.domains+' · шаблоны — '+stat.patterns+'. Записи могут включать поддомены.' : item && item.srs_cached ? 'Количество записей вычисляется или недоступно.' : 'Количество записей появится после загрузки списка.';
+}
 function atlasRouteName(tag,data) {
     var labels={direct:'Напрямую','policy-block':'Заблокировано',proxy:'Общий прокси',auto:'Общий автовыбор'};
     if(labels[tag])return labels[tag];
@@ -393,6 +398,10 @@ return view.extend({
                 if (values[2]) self.liveSections=values[2].sections || [];
                 var previous = self.data.job || {};
                 self.data = d;
+                if (self.tab === 'routing') {
+                    var statsLabel=self.root.querySelector('.at-srs-category-stats');
+                    if(statsLabel)statsLabel.textContent=categoryAdsStatsText(d);
+                }
                 self.offline = false;
                 if (d.job && d.job.id && (d.job.status === 'done' || d.job.status === 'error') &&
                     (previous.id !== d.job.id || previous.status !== d.job.status)) {
@@ -1223,7 +1232,8 @@ return view.extend({
         }
         var listStatus = node('div', 'at-privacy-list', (s.remote_lists || []).map(function(x) {
             var count = Number(x.count || 0);
-            return node('div', 'at-privacy-row', [pill(x.error ? 'ОШИБКА' : x.updated ? 'ОБНОВЛЁН' : 'ОЖИДАЕТ', x.error ? 'danger' : x.updated ? 'success' : 'neutral'), node('span', '', label(x.name + ' · ' + (x.format === 'srs' ? 'SRS binary' : count + ' правил') + ' · ' + (x.error || (x.updated ? date(x.updated) : 'не загружен'))))]);
+            var stat=(d.srs_stats || {})[x.id];
+            return node('div', 'at-privacy-row', [pill(x.error ? 'ОШИБКА' : x.updated ? 'ОБНОВЛЁН' : 'ОЖИДАЕТ', x.error ? 'danger' : x.updated ? 'success' : 'neutral'), node('span', '', label(x.name + ' · ' + (x.format === 'srs' ? stat ? stat.domains + ' доменных записей · ' + stat.patterns + ' шаблонов' : 'SRS: подсчёт недоступен' : count + ' правил') + ' · ' + (x.error || (x.updated ? date(x.updated) : 'не загружен'))))]);
         }));
         return self.routingLayout(node('div', 'at-content', [self.sectionHead('Куда направлять трафик', 'Исключения имеют приоритет. Локальная сеть всегда доступна напрямую.', self.button('Обновления источников',function(){self.navigate('settings');},'',self.busy())),
             self.plannerCard(),
@@ -1231,7 +1241,7 @@ return view.extend({
             node('section','at-card at-padded',[node('h3','',label('Журнал службы')),node('p','at-footnote',label('Последние 200 строк Atlas из системного журнала. Доступны только администратору; могут содержать адреса и сведения о подключениях.')),self.button('Показать журнал',function(){return result(api.serviceLogs()).then(function(r){ui.showModal('Журнал Atlas',[node('pre','',label(r.content||'Записей нет')),node('p','at-footnote',label(r.truncated?'Показана последняя часть журнала.':'')),atlasElement('button',{'class':'btn',click:ui.hideModal},'Закрыть')]);});},'ghost',self.busy())]),
             node('section', 'at-card at-padded', [self.field('Режим маршрутизации', mode),node('label','at-checkbox',[groupOrder,label('Проверять группы по порядку вместе с их списками')])]),
             node('section','at-card at-padded at-global-direct',[node('h3','',label('Всегда напрямую — для всех секций')),node('p','at-footnote',label('Эти сайты и IP обходят все прокси и VPN секций, в обоих режимах маршрутизации. Добавьте один раз — дублировать в секциях не нужно. Сайт при прямом доступе увидит ваш IP провайдера.')),node('div','at-grid-2',[self.field('Сайты всегда напрямую',inputs.bypass_domains,'Без https://, по одному на строку. Поддомены включены.'),self.field('IP и сети всегда напрямую',inputs.bypass_cidrs,'IP сайтов или подсети назначения, по одному на строку.')]),atlasElement('details',{},[atlasElement('summary',{},'Целые устройства напрямую'),self.field('Устройства всегда напрямую',inputs.routing_excluded_ips,'IP домашних устройств. Все их соединения обходят прокси, а не только отдельные сайты.')]),node('p','at-footnote',label('Исключения меняют маршрут, но не отключают общие запреты. Защита от прямого выхода при её включении может запретить такое соединение.'))]),
-            node('section','at-card at-padded at-global-block',[node('h3','',label('Блокировать рекламу и отслеживание')),node('label','at-checkbox',[adsList,label('Список сообщества category-ads-all')]),node('p','at-footnote',label('Дополняет ваши адреса готовым обновляемым списком рекламы. Некоторые сайты могут работать иначе.')),node('p','at-footnote',label('Укажите домены, которые нужно заблокировать во всех секциях. Вводите по одному домену на строку, без https://; поддомены тоже блокируются.')),self.field('Заблокированные домены',blocked),node('p','at-footnote',label('После изменения сохраните и примените правила внизу страницы. Блокировка действует через DNS Atlas; приложения со своим DNS могут её обойти.'))]),
+            node('section','at-card at-padded at-global-block',[node('h3','',label('Блокировать рекламу и отслеживание')),node('label','at-checkbox',[adsList,label('Список сообщества category-ads-all')]),node('p','at-footnote at-srs-category-stats',label(categoryAdsStatsText(d))),node('p','at-footnote',label('Дополняет ваши адреса готовым обновляемым списком рекламы. Некоторые сайты могут работать иначе.')),node('p','at-footnote',label('Укажите домены, которые нужно заблокировать во всех секциях. Вводите по одному домену на строку, без https://; поддомены тоже блокируются.')),self.field('Заблокированные домены',blocked),node('p','at-footnote',label('После изменения сохраните и примените правила внизу страницы. Блокировка действует через DNS Atlas; приложения со своим DNS могут её обойти.'))]),
             node('section','at-card at-padded at-legacy-tunnel',[node('p','at-footnote',label('Сохранённые правила общего прокси без привязки к секции. Они проверяются после правил секций; общие прямые исключения выше. Для новой настройки добавляйте сайты и устройства в секцию. Эти поля оставлены, чтобы прежние маршруты не исчезли.')),self.field('Старые домены общего прокси',inputs.domains),self.field('Старые IP общего прокси',inputs.cidrs),self.field('Старые устройства общего прокси',inputs.routed_source_ips)]),
             node('section', 'at-card at-padded', [node('h3', '', label('Секции: подключение, сайты и списки')), node('p', 'at-footnote', label('В каждой секции выберите подключение и добавьте её сайты, списки или устройства. При включённом порядке групп секции проверяются сверху вниз вместе со своими списками. Исключения имеют приоритет.')), sectionList, addSection, atlasElement('details', {}, [atlasElement('summary', {}, 'Текстовый формат секций'), node('p','at-footnote',label('Поля через |: имя | действие | домены | CIDR | источник | пул | интерфейс | DNS | входящие интерфейсы | порты | tcp/udp. Для секций с портами/транспортом задавайте FakeIP отдельной доменной секцией. JSON outbound и настройки прокси сохраняются при совпадении имени.')), self.field('Секция на строку', sections)])]),
             node('section', 'at-card at-padded', [node('h3', '', label('Импорт локального списка')), node('p', 'at-footnote', label('Загрузите UTF-8 файл .txt/.lst/.json размером до 4 МиБ. Записи проверяются на роутере; содержимое хранится только в правилах Atlas.')), self.field('Действие для правил', localTarget), self.field('Файл доменов / CIDR', localFile)]),

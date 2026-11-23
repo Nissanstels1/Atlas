@@ -2256,6 +2256,77 @@ def active_job():
     return job
 
 
+def srs_list_fingerprint(item):
+    if item.get('format')!='srs' or not item.get('srs_cached') or item.get('policy') not in ('block','dnsblock'):
+        return None
+    ident=item.get('id','')
+    if not isinstance(ident,str) or not re.fullmatch(r'[a-f0-9]{16}',ident):return None
+    path=DATA/'rules'/(ident+'.srs')
+    try:
+        import stat
+        info=path.lstat()
+        if not stat.S_ISREG(info.st_mode) or not 0<info.st_size<=4194304:return None
+        return [info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns]
+    except OSError:return None
+
+
+def count_srs_list(ident):
+    """Count patterns once per cached version, without recording queries."""
+    try:
+        with named_lock('srs-stat-'+ident+'.lock'):
+            item=next((x for x in state()['settings']['remote_lists'] if x.get('id')==ident),None)
+            fingerprint=srs_list_fingerprint(item or {})
+            if not fingerprint:return
+            result={'fingerprint':fingerprint,'at':int(time.time()),'available':False}
+            try:
+                with tempfile.TemporaryDirectory(prefix='srs-count-',dir=RUN) as tmp:
+                    output=Path(tmp)/'rules.json'
+                    command=['/bin/sh','-c','ulimit -f 8192; exec "$@"','atlas-limit',BINARY,'rule-set','decompile','--output',str(output),str(DATA/'rules'/(ident+'.srs'))]
+                    completed=subprocess.run(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=8)
+                    if completed.returncode or not output.is_file() or output.stat().st_size>4194304:raise ValueError('invalid output')
+                    content=json.loads(output.read_bytes());counts={'domain':0,'domain_suffix':0,'domain_keyword':0,'domain_regex':0}
+                    def walk(value):
+                        if isinstance(value,dict):
+                            for key,child in value.items():
+                                if key in counts:
+                                    entries=child if isinstance(child,list) else [child]
+                                    if not all(isinstance(x,str) for x in entries):raise ValueError('invalid matcher')
+                                    counts[key]+=len(entries)
+                                elif isinstance(child,(dict,list)):walk(child)
+                        elif isinstance(value,list):
+                            for child in value:walk(child)
+                    if not isinstance(content,dict) or not isinstance(content.get('rules'),list):raise ValueError('invalid rules')
+                    walk(content['rules'])
+                    if srs_list_fingerprint(item)!=fingerprint:raise ValueError('changed during count')
+                    result.update(available=True,domains=counts['domain']+counts['domain_suffix'],patterns=counts['domain_keyword']+counts['domain_regex'])
+            except (OSError,ValueError,TypeError,RecursionError,subprocess.SubprocessError):pass
+            atomic(RUN/('srs-stat-'+ident+'.json'),result)
+    except (AtlasError,OSError,ValueError,TypeError):pass
+
+
+def public_srs_stats(items):
+    stats={};scheduled=False
+    for item in items:
+        fingerprint=srs_list_fingerprint(item)
+        if not fingerprint:continue
+        ident=item['id']
+        try:cached=read_json(RUN/('srs-stat-'+ident+'.json'),{})
+        except (OSError,ValueError,UnicodeError):cached={}
+        if not isinstance(cached,dict):cached={}
+        if cached.get('fingerprint')==fingerprint:
+            if cached.get('available') is True:
+                stats[ident]={'domains':cached.get('domains',0),'patterns':cached.get('patterns',0)}
+                continue
+            at=cached.get('at',0)
+            if type(at) in (int,float) and 0<=time.time()-at<3600:continue
+        if scheduled:continue
+        try:
+            subprocess.Popen([sys.executable,SCRIPT,'srs-stat',ident],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+            scheduled=True
+        except OSError:pass
+    return stats
+
+
 def public_status():
     current = state()
     running = service_running()
@@ -2324,6 +2395,7 @@ def public_status():
     adaptive=adaptive_status(running,current['settings'])
     return {'ok': True, 'running': running, 'engine': engine_version(), 'engine_features': __import__('engine_features').capabilities(BINARY),
             'subscriptions': subscriptions, 'nodes': nodes, 'interfaces': sorted(system_interfaces()), 'settings': public_settings,
+            'srs_stats': public_srs_stats(current['settings'].get('remote_lists',[])),
             'runtime': runtime_status(raw_nodes, running), 'eligible_count': len(eligible),
             'checks': read_json(RUN / 'checks.json', {}), 'job': active_job(),
             'applied': read_json(RUN / 'applied.json', {}), 'privacy': privacy,
@@ -3212,6 +3284,8 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == 'engine-run':
         with named_lock('engine-supervisor.lock',True):
             sys.exit(supervise_engine())
+    if len(sys.argv)==3 and sys.argv[1]=='srs-stat' and re.fullmatch(r'[a-f0-9]{16}',sys.argv[2]):
+        count_srs_list(sys.argv[2]);return
     if len(sys.argv)>1 and sys.argv[1]=='quick-auto-select':
         try:
             with locked():result=automatic_select(state())
