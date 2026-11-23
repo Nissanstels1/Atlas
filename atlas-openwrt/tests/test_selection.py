@@ -128,7 +128,7 @@ class AutoSelection(unittest.TestCase):
         s=sample();s['settings'].update(auto_interval_seconds=30,auto_tolerance_ms=120,interrupt_connections=True)
         group=next(x for x in core.make_config(s)['outbounds'] if x['type']=='urltest')
         self.assertEqual(group['interval'],'30s');self.assertEqual(group['tolerance'],120)
-        self.assertTrue(group['interrupt_exist_connections']);self.assertEqual(group['idle_timeout'],'30m')
+        self.assertTrue(group['interrupt_exist_connections']);self.assertEqual(group['idle_timeout'],'1800s')
         self.assertEqual(len(group['outbounds']),3)
 
     def test_legacy_settings_migrate_without_network_side_effects(self):
@@ -138,7 +138,7 @@ class AutoSelection(unittest.TestCase):
 
     def test_bad_filter_parameters(self):
         cases=[{'countries':['Estonia']},{'countries':[None]},{'excluded_countries':['RUS']},{'preferred_countries':['?']},{'protocols':['exec']},
-               {'include_names':['\n']},{'auto_interval_seconds':0},{'auto_interval_seconds':1801},{'auto_interval_seconds':True},
+               {'include_names':['\n']},{'auto_interval_seconds':0},{'auto_interval_seconds':9223372037},{'auto_interval_seconds':True},
                {'auto_tolerance_ms':0},{'auto_tolerance_ms':2001},{'interrupt_connections':'true'},
                {'auto_strategy':'random'},{'min_ping_ms':400,'max_ping_ms':300},{'max_ping_ms':60001},
                {'urltest_url':'http://example.com/test'},

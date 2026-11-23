@@ -234,6 +234,9 @@
 .atlas .at-profile-rows .at-table tr.selected td{background:transparent}
 .atlas .at-profile-rows .at-table tr.selected strong{color:#d3fff1}
 .atlas .at-profile-rows .at-table tr.selected small{color:#b4d4ce}
+.atlas .at-profile-rows .at-table tr.favorite:not(.selected){background:#312846;outline:1px solid #bba5ff;outline-offset:-1px;box-shadow:inset 4px 0 #bba5ff}
+.atlas .at-profile-rows .at-table tr.favorite:not(.selected) td{background:transparent}
+.atlas .at-profile-rows .at-table tr.favorite.selected{box-shadow:inset 4px 0 #bba5ff}
 /* Connection information is a compact list, independent of editable tables. */
 .atlas .at-flow-list{margin-top:8px;border:1px solid var(--at-line);border-radius:7px;container-type:inline-size;overflow:hidden}
 .atlas .at-flow{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) auto;align-items:center;gap:4px 12px;padding:8px 10px;border-bottom:1px solid var(--at-line);font-size:12px;line-height:1.4;min-width:0}

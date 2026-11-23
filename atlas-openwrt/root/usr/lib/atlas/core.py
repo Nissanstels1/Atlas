@@ -1065,7 +1065,7 @@ def defaults():
     return {'version': 1, 'subscriptions': [], 'settings': {'mode': 'rules', 'selected': 'auto',
         'domains': [], 'cidrs': [], 'bypass_domains': [], 'bypass_cidrs': [], 'interval_hours': 12, 'list_catalogue': [],
         'countries': [], 'excluded_countries': [], 'preferred_countries': [], 'require_verified_countries': False, 'protocols': [], 'include_names': [], 'exclude_names': [],
-        'group_order': False, 'auto_interval_seconds': 60, 'auto_tolerance_ms': 80, 'interrupt_connections': False,
+        'group_order': False, 'auto_interval_seconds': 60, 'auto_tolerance_ms': 80, 'interrupt_connections': False, 'favorite_profile': '',
         'auto_strategy': 'fastest', 'min_ping_ms': 0, 'max_ping_ms': 0,
         'urltest_url': 'https://www.gstatic.com/generate_204',
         'urltest_fallbacks': [], 'urltest_download_check': 'default', 'urltest_download_url': '',
@@ -1138,11 +1138,14 @@ def validate_settings(data):
         raise AtlasError('Автоматический прокси доступен в режиме маршрутизации по правилам')
     if not isinstance(result['selected'], str) or not re.fullmatch(r'auto|[a-f0-9]{32}', result['selected']):
         raise AtlasError('Некорректный выбор узла')
+    if not isinstance(result['favorite_profile'],str) or not re.fullmatch(r'(?:[a-f0-9]{32})?',result['favorite_profile']):
+        raise AtlasError('Некорректный любимый профиль')
     if type(result['interval_hours']) is not int or not 1 <= result['interval_hours'] <= 168:
         raise AtlasError('Интервал: 1–168 часов')
     if type(result['max_active_nodes']) is not int or result['max_active_nodes'] not in (0, 128, 256, 512, 1024, 2048, 4096):
         raise AtlasError('Пул активных профилей: 0 без лимита либо 128, 256, 512, 1024')
-    for key, minimum, maximum in [('auto_interval_seconds', 30, 1800), ('auto_tolerance_ms', 1, 2000)]:
+    # Go's time.Duration stores nanoseconds in a signed 64-bit integer.
+    for key, minimum, maximum in [('auto_interval_seconds', 1, 9223372036), ('auto_tolerance_ms', 1, 2000)]:
         if type(result[key]) is not int or not minimum <= result[key] <= maximum:
             raise AtlasError('%s: допустимо %d–%d' % (key, minimum, maximum))
     if type(result['interrupt_connections']) is not bool:
@@ -1473,7 +1476,7 @@ def validate_settings(data):
             raise AtlasError('Версия UDP-over-TCP секции: 1 или 2')
         if section['resolve_real_ip'] is not None and type(section['resolve_real_ip']) is not bool:
             raise AtlasError('Разрешение IP секции: наследовать, включить или выключить')
-        for key,minimum,maximum in [('auto_interval_seconds',30,1800),('auto_tolerance_ms',1,2000)]:
+        for key,minimum,maximum in [('auto_interval_seconds',1,9223372036),('auto_tolerance_ms',1,2000)]:
             section.setdefault(key,None)
             if section[key] is not None and (type(section[key]) is not int or not minimum <= section[key] <= maximum):
                 raise AtlasError('Параметр автопроверки секции вне допустимого диапазона')
@@ -1783,7 +1786,7 @@ def all_nodes(state, *, copy_nodes=True):
     return nodes
 
 def custom_auto_policy(settings):
-    return settings['auto_strategy'] != 'fastest' or bool(settings['preferred_countries']) or bool(settings['min_ping_ms'] or settings['max_ping_ms']) or any(s.get('enabled',True) and s.get('site_checks') for s in settings['sections'])
+    return bool(settings.get('favorite_profile')) or settings['auto_strategy'] != 'fastest' or bool(settings['preferred_countries']) or bool(settings['min_ping_ms'] or settings['max_ping_ms']) or any(s.get('enabled',True) and s.get('site_checks') for s in settings['sections'])
 
 
 def rank_auto_candidates(candidates, settings, previous=None):
@@ -1797,8 +1800,10 @@ def rank_auto_candidates(candidates, settings, previous=None):
         return None
     best = min(candidates)
     current = next((item for item in candidates if item[4] == previous), None)
-    if (current is not None and current[:2] == best[:2]
-            and current[2] <= best[2] + settings['auto_tolerance_ms']):
+    within_tolerance=(current is not None and
+                      (current[3] + settings['auto_tolerance_ms'] >= best[3] if settings['auto_strategy']=='slowest'
+                       else current[3] <= best[3] + settings['auto_tolerance_ms']))
+    if current is not None and current[:2] == best[:2] and within_tolerance:
         return current[4]
     return best[4]
 
@@ -1903,6 +1908,9 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                 hop['tag'] = hop_tags[index]
                 if index + 1 < len(hop_tags): hop['detour'] = hop_tags[index + 1]
                 outs.append(hop)
+    favorite=settings.get('favorite_profile','')
+    if not probe_node and favorite in tags:
+        tags.remove(favorite);tags.insert(0,favorite)
     selected = ('auto' if no_profiles and settings['dns_fallback_direct_doh'] else settings['selected']) if not probe_node else tags[0]
     if selected != 'auto' and selected not in tags:
         raise AtlasError('Выбранный сервер отсутствует. Выберите другой или Авто.')
@@ -1910,10 +1918,10 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
     if custom and selected == 'auto':
         selected = 'policy-block'
     outs = [{'type': 'selector', 'tag': 'proxy', 'outbounds': ['auto', 'policy-block'] + tags, 'default': selected,
-             'interrupt_exist_connections': settings['interrupt_connections'] or custom},
+             'interrupt_exist_connections': settings['interrupt_connections']},
             {'type': 'urltest', 'tag': 'auto', 'outbounds': tags, 'url': settings['urltest_url'],
              'interval': '%ds' % settings['auto_interval_seconds'], 'tolerance': settings['auto_tolerance_ms'],
-             'idle_timeout': '30m', 'interrupt_exist_connections': settings['interrupt_connections']},
+             'idle_timeout': '%ds' % max(1800, settings['auto_interval_seconds']), 'interrupt_exist_connections': settings['interrupt_connections']},
             {'type': 'direct', 'tag': 'direct'}, {'type': 'block', 'tag': 'policy-block'}] + outs
     if settings['direct_fakeip_doh'] and not probe_node:
         next(out for out in outs if out['tag'] == 'direct')['domain_resolver'] = 'direct-doh'
@@ -1937,10 +1945,10 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
         member_tags = [n.get('key', n['id']) for n in members]
         outs.extend([{'type': 'selector', 'tag': pool_tag, 'outbounds': [auto_tag, 'policy-block'] + member_tags,
                       'default': 'policy-block' if custom else auto_tag,
-                      'interrupt_exist_connections': settings['interrupt_connections'] or custom},
+                      'interrupt_exist_connections': settings['interrupt_connections']},
                      {'type': 'urltest', 'tag': auto_tag, 'outbounds': member_tags,
                       'url': settings['urltest_url'], 'interval': '%ds' % settings['auto_interval_seconds'],
-                      'tolerance': settings['auto_tolerance_ms'], 'idle_timeout': '30m',
+                      'tolerance': settings['auto_tolerance_ms'], 'idle_timeout': '%ds' % max(1800, settings['auto_interval_seconds']),
                       'interrupt_exist_connections': settings['interrupt_connections']}])
         pool_tags[sub_id] = pool_tag
     interface_tags = {}
@@ -1993,8 +2001,8 @@ def make_config(state, tun=True, mixed_port=2080, probe_node=None, api_secret=No
                 target='section_'+section['id']+'_control'
                 automatic='section_'+section['id']+'_auto'
                 outs.extend([
-                    {'type':'selector','tag':target,'outbounds':[automatic,'policy-block']+members,'default':'policy-block' if custom else automatic,'interrupt_exist_connections':settings['interrupt_connections'] or custom},
-                    {'type':'urltest','tag':automatic,'outbounds':members,'url':section['urltest_url'] or settings['urltest_url'],'interval':'%ds'%(section['auto_interval_seconds'] if section['auto_interval_seconds'] is not None else settings['auto_interval_seconds']),'tolerance':section['auto_tolerance_ms'] if section['auto_tolerance_ms'] is not None else settings['auto_tolerance_ms'],'idle_timeout':'30m','interrupt_exist_connections':settings['interrupt_connections']}])
+                    {'type':'selector','tag':target,'outbounds':[automatic,'policy-block']+members,'default':'policy-block' if custom else automatic,'interrupt_exist_connections':settings['interrupt_connections']},
+                    {'type':'urltest','tag':automatic,'outbounds':members,'url':section['urltest_url'] or settings['urltest_url'],'interval':'%ds'%(section['auto_interval_seconds'] if section['auto_interval_seconds'] is not None else settings['auto_interval_seconds']),'tolerance':section['auto_tolerance_ms'] if section['auto_tolerance_ms'] is not None else settings['auto_tolerance_ms'],'idle_timeout':'%ds'%max(1800,section['auto_interval_seconds'] if section['auto_interval_seconds'] is not None else settings['auto_interval_seconds']),'interrupt_exist_connections':settings['interrupt_connections']}])
         section_targets[section['id']] = target
     features = None
     if not probe_node:

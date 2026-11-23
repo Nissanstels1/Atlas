@@ -550,34 +550,85 @@ def clash_request(method='GET', path='/proxies', body=None, timeout=2):
         connection.close()
 
 
+def fresh_auto_sample(sample, settings, now=None):
+    now=int(time.time() if now is None else now)
+    if not isinstance(sample,dict) or type(sample.get('delay')) is not int or not 0 < sample['delay'] <= 60000:return False
+    stamp=sample.get('time')
+    if not isinstance(stamp,str) or len(stamp)>64:return False
+    try:
+        parsed=datetime.datetime.fromisoformat(stamp.replace('Z','+00:00'))
+        if parsed.tzinfo is None:return False
+        age=now-int(parsed.timestamp())
+        return -60<=age<=max(180,settings['auto_interval_seconds']*3)
+    except (TypeError,ValueError,OverflowError,OSError):return False
+
+
+def active_sample_needs_check(sample, settings, now=None, pool_size=0):
+    if not fresh_auto_sample(sample,settings,now):return True
+    interval=settings['auto_interval_seconds']
+    if interval<300:return False
+    try:
+        stamp=datetime.datetime.fromisoformat(sample['time'].replace('Z','+00:00')).timestamp()
+        age=(time.time() if now is None else now)-stamp
+        # Start active members ahead of the rest, allowing for a large pool and
+        # the once-per-minute scheduler. Bound early checks for short intervals.
+        margin=min(interval//2,900,max(180,((max(0,pool_size)+9)//10)*10+60))
+        return age>=interval-margin
+    except (ValueError,TypeError,OverflowError,OSError):return True
+
+
+def remember_auto_history(proxies):
+    """Keep recent distinct successful measurements in RAM for stable scoring.
+
+    The engine exposes only its latest successful sample. An empty live history
+    remains empty: a cached success must not turn a failed node into a candidate.
+    """
+    if not isinstance(proxies,dict):return proxies
+    path=RUN/'auto-history.json'
+    try:
+        generation=hashlib.sha256(CONFIG.read_bytes()).hexdigest()
+        saved=read_json(path,{}) if path.is_file() and path.stat().st_size<=2097152 else {}
+        old=saved.get('samples',{}) if isinstance(saved,dict) and saved.get('generation')==generation else {}
+        if not isinstance(old,dict):old={}
+        output=dict(proxies);current={};changed=False
+        for tag,entry in proxies.items():
+            if not isinstance(tag,str) or not re.fullmatch(r'(?:[a-f0-9]{32}|section_[a-f0-9]{16}_[a-f0-9]{32})',tag):continue
+            prior=old.get(tag,[])
+            if not isinstance(prior,list):prior=[]
+            prior=[x for x in prior[-5:] if isinstance(x,dict) and isinstance(x.get('time'),str) and type(x.get('delay')) is int and 0<x['delay']<=60000]
+            live=entry.get('history',[]) if isinstance(entry,dict) else []
+            if isinstance(live,list) and live and isinstance(live[-1],dict):
+                sample=live[-1]
+                if isinstance(sample.get('time'),str) and len(sample['time'])<=64 and type(sample.get('delay')) is int and 0<sample['delay']<=60000:
+                    if not prior or prior[-1].get('time')!=sample['time']:
+                        prior=(prior+[{'time':sample['time'],'delay':sample['delay']}])[-5:];changed=True
+                    output[tag]=dict(entry,history=prior)
+            if prior:current[tag]=prior
+        if set(current)!=set(old):changed=True
+        if changed:atomic(path,{'generation':generation,'samples':current})
+        return output
+    except (OSError,ValueError,TypeError,OverflowError):return proxies
+
+
 def auto_choice(nodes, settings, proxies, now=None, previous=None):
     """Return best measured filtered node, or None when evidence is stale/absent."""
     now = int(now or time.time())
     preferred = settings['preferred_countries']
     reserve_order = {key:index+1 for index,key in enumerate(settings.get('urltest_fallbacks', []))}
-    def fresh_sample(sample):
-        stamp=sample.get('time')
-        if not isinstance(stamp,str) or len(stamp)>64:return False
-        try:
-            parsed=datetime.datetime.fromisoformat(stamp.replace('Z','+00:00'))
-            if parsed.tzinfo is None:return False
-            age=now-int(parsed.timestamp())
-            return -60<=age<=max(180,settings['auto_interval_seconds']*3)
-        except (TypeError,ValueError,OverflowError,OSError):return False
     candidates = []
     for node in nodes:
         proxy = proxies.get(node['key'], {}) if isinstance(proxies, dict) else {}
         history = proxy.get('history', []) if isinstance(proxy, dict) else []
         if not isinstance(history, list) or not history or not isinstance(history[-1], dict) or type(history[-1].get('delay')) is not int or not 0 < history[-1]['delay'] <= 60000:
             continue
-        if not fresh_sample(history[-1]):continue
+        if not fresh_auto_sample(history[-1],settings,now):continue
         delays = []
         for sample in history[-5:] if isinstance(history, list) else []:
             if not isinstance(sample, dict) or type(sample.get('delay')) is not int:
                 continue
             if not 0 < sample['delay'] <= 60000:
                 continue
-            if not fresh_sample(sample):continue
+            if not fresh_auto_sample(sample,settings,now):continue
             delays.append(sample['delay'])
         if not delays:
             continue
@@ -600,7 +651,78 @@ def auto_choice(nodes, settings, proxies, now=None, previous=None):
         # eligible only after every primary failed these same fresh criteria.
         reserve_rank = reserve_order.get(node['key'], 0)
         candidates.append((reserve_rank, country_rank, score, recent, node['key']))
+    favorite=settings.get('favorite_profile','')
+    if favorite and any(item[4]==favorite for item in candidates):
+        return favorite
     return rank_auto_candidates(candidates, settings, previous)
+
+
+def favorite_failure_observed(current, proxies):
+    """Notice a missing live result only for a favorite actually in automatic use."""
+    settings=current['settings'];favorite=settings.get('favorite_profile','')
+    if not favorite or not isinstance(proxies,dict):return False
+    groups=[]
+    if settings.get('selected')=='auto':groups.append(('proxy',favorite))
+    choices=settings.get('section_choices',{})
+    for section in settings.get('sections',[]):
+        tag='section_'+section['id']+'_control'
+        if section.get('enabled') and not section.get('outbound_config') and tag not in choices:
+            groups.append((tag,section_node_prefix(section,settings)+favorite))
+    for sub in current.get('subscriptions',[]):
+        tag='pool_'+sub['id']
+        if sub.get('enabled',True) and tag not in choices:groups.append((tag,favorite))
+    for tag,key in groups:
+        entry=proxies.get(key)
+        if proxies.get(tag,{}).get('now')==key and isinstance(entry,dict) and not entry.get('history'):
+            return True
+    return False
+
+
+def automatic_select_from_worker(stop):
+    """Run selection in a main process, where timed site probes are supported."""
+    process=subprocess.Popen([sys.executable,str(Path(__file__)),'quick-auto-select'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+    deadline=time.monotonic()+60
+    try:
+        while process.poll() is None:
+            if stop.wait(.2) or time.monotonic()>=deadline:
+                process.terminate()
+                try:process.wait(timeout=2)
+                except subprocess.TimeoutExpired:process.kill();process.wait()
+                return {}
+        output=process.stdout.read(65536)
+        return json.loads(output) if process.returncode==0 else {}
+    finally:
+        if process.stdout:process.stdout.close()
+
+
+def watch_favorite_failure(stop):
+    """React to an engine-reported failure without re-running the whole pool."""
+    next_attempt=0
+    while not stop.wait(5):
+        try:
+            if time.monotonic()<next_attempt:continue
+            current=state()
+            if not current['settings'].get('favorite_profile'):continue
+            proxies=clash_request(timeout=2).get('proxies',{})
+            if not favorite_failure_observed(current,proxies):continue
+            next_attempt=time.monotonic()+20
+            automatic_select_from_worker(stop)
+        except (AtlasError,OSError,ValueError,TypeError,KeyError,http.client.HTTPException,subprocess.SubprocessError):
+            continue
+
+
+def bootstrap_auto_selection(stop):
+    """Start managed automatic groups as soon as measured candidates appear."""
+    for _ in range(18):
+        if stop.wait(5):return
+        try:
+            current=state()
+            if not custom_auto_policy(current['settings']):return
+            result=automatic_select_from_worker(stop)
+            groups=result.get('groups',[])
+            if groups and all(item.get('ok') and not item.get('blocked') for item in groups):return
+        except (AtlasError,OSError,ValueError,TypeError,KeyError,http.client.HTTPException,subprocess.SubprocessError):
+            continue
 
 
 def automatic_select(current):
@@ -612,6 +734,7 @@ def automatic_select(current):
     custom = custom_auto_policy(settings)
     try:
         proxies = clash_request().get('proxies', {})
+        if settings['auto_strategy']=='stable':proxies=remember_auto_history(proxies)
         groups = {}
         if settings['selected'] == 'auto':
             groups['proxy'] = (nodes, 'auto', settings)
@@ -631,10 +754,13 @@ def automatic_select(current):
                     policy[field]=section.get(field, [] if field=='urltest_fallbacks' else 'default' if field=='urltest_download_check' else '')
                 if prefix:
                     policy['urltest_fallbacks']=[prefix+key for key in policy['urltest_fallbacks']]
+                    if policy.get('favorite_profile'):policy['favorite_profile']=prefix+policy['favorite_profile']
                 if section['auto_interval_seconds'] is not None:
                     policy['auto_interval_seconds']=section['auto_interval_seconds']
                 if section['auto_tolerance_ms'] is not None:
                     policy['auto_tolerance_ms']=section['auto_tolerance_ms']
+                if section.get('urltest_url'):
+                    policy['urltest_url']=section['urltest_url']
                 groups[tag]=(members, 'section_'+section['id']+'_auto', policy)
         sites=None
         if any(policy.get('site_checks') for _,_,policy in groups.values()):
@@ -671,9 +797,44 @@ def automatic_select(current):
             ordered=ordered[offset:]+ordered[:offset]
         if sites is not None and transfers is not None:
             transfers.deadline=sites.deadline
+        # Check the selected members before considering alternatives. A missing
+        # history entry can mean either a failed test or a round still in the
+        # queue; it must not by itself prove that the current member is down.
+        active_checks={}
+        for tag,(members,native,policy) in ordered:
+            previous=proxies.get(tag,{}).get('now')
+            if not custom and previous==native:
+                previous=proxies.get(native,{}).get('now')
+            if not previous or not any(n['key']==previous for n in members):continue
+            history=proxies.get(previous,{}).get('history',[])
+            if isinstance(history,list) and history and not active_sample_needs_check(history[-1],policy,pool_size=len(members)):continue
+            url=policy.get('urltest_url') or settings['urltest_url']
+            check_key=(previous,url)
+            if check_key in active_checks:continue
+            if len(active_checks)>=8:
+                active_checks[check_key]=None
+                continue
+            try:
+                query=urlencode({'url':url,'timeout':5000})
+                response=clash_request('GET','/proxies/'+quote(previous,safe='')+'/delay?'+query,timeout=7)
+                delay=response.get('delay') if isinstance(response,dict) else None
+                if type(delay) is not int or not 0<delay<=60000:
+                    active_checks[check_key]=None
+                else:
+                    sample={'delay':delay,'time':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+                    proxies.setdefault(previous,{})['history']=[sample]
+                    active_checks[check_key]=True
+            except AtlasError as exc:
+                active_checks[check_key]=False if re.search(r'HTTP (?:503|504)\b',str(exc)) else None
+            except (OSError,ValueError,TypeError,http.client.HTTPException):
+                active_checks[check_key]=None
         results = []
         for tag, (members, native, policy) in ordered:
             previous = proxies.get(tag, {}).get('now')
+            check_key=(previous,policy.get('urltest_url') or settings['urltest_url'])
+            if check_key in active_checks and active_checks[check_key] is None:
+                results.append({'group':tag,'selected':previous,'blocked':False,'changed':False,'ok':True,'reason':'active-check-unavailable'})
+                continue
             rank=lambda members,policy,live: auto_choice(members,policy,live,None,previous)
             download=None
             if sites is not None and policy.get('site_checks'):
@@ -2883,6 +3044,9 @@ def supervise_engine():
     old_handlers={}
     adaptive_worker=None
     log_thread=None
+    favorite_stop=threading.Event()
+    favorite_thread=None
+    bootstrap_thread=None
     child=None
     for signum in (signal.SIGTERM,signal.SIGINT):
         old_handlers[signum]=signal.signal(signum,lambda *args:stopped.__setitem__(0,True))
@@ -2990,6 +3154,12 @@ def supervise_engine():
             log_thread.start()
         def report(stage,**fields):
             startup_report(stage,requires_dns=current['settings']['dhcp_dns_enabled'],**fields)
+        if current['settings'].get('favorite_profile'):
+            favorite_thread=threading.Thread(target=watch_favorite_failure,args=(favorite_stop,),daemon=True)
+            favorite_thread.start()
+        if custom_auto_policy(current['settings']):
+            bootstrap_thread=threading.Thread(target=bootstrap_auto_selection,args=(favorite_stop,),daemon=True)
+            bootstrap_thread.start()
         return supervise(child,ready,attach,restore_start_network,report,stopped=lambda:stopped[0])
     except (AtlasError,OSError,ValueError,TypeError,KeyError,RuntimeError,subprocess.SubprocessError):
         if child is not None and child.poll() is None:
@@ -3002,6 +3172,9 @@ def supervise_engine():
         startup_report('prepare-failed',failed=True,local_ready=False,network_restored=restored)
         return 1
     finally:
+        favorite_stop.set()
+        if favorite_thread:favorite_thread.join(timeout=2)
+        if bootstrap_thread:bootstrap_thread.join(timeout=2)
         if adaptive_worker:adaptive_worker.close()
         if log_thread:log_thread.join(timeout=2)
         for signum,handler in old_handlers.items():
@@ -3039,6 +3212,13 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == 'engine-run':
         with named_lock('engine-supervisor.lock',True):
             sys.exit(supervise_engine())
+    if len(sys.argv)>1 and sys.argv[1]=='quick-auto-select':
+        try:
+            with locked():result=automatic_select(state())
+            print(json.dumps(result))
+        except (AtlasError,OSError,ValueError,TypeError,KeyError,http.client.HTTPException):
+            print('{}')
+        return
     if len(sys.argv) > 2 and sys.argv[1] == 'worker':
         worker(sys.argv[2])
         return

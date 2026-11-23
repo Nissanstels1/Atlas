@@ -66,7 +66,7 @@ class CompletedPolicies(unittest.TestCase):
         state=sample();state['settings'].update(max_ping_ms=50)
         cfg=core.make_config(state)
         self.assertEqual(cfg['outbounds'][0]['default'],'policy-block')
-        self.assertTrue(cfg['outbounds'][0]['interrupt_exist_connections'])
+        self.assertFalse(cfg['outbounds'][0]['interrupt_exist_connections'])
         self.assertTrue(cfg['experimental']['cache_file']['enabled'])
         self.assertTrue(cfg['experimental']['cache_file']['store_fakeip'])
         first=atlas.prepare_engine_start(cfg);second=atlas.prepare_engine_start(first)
