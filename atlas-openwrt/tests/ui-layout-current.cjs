@@ -62,6 +62,23 @@ const root=path.resolve(__dirname,'..');
    const modal=await page.locator('#modal').evaluate(m=>({overflow:m.scrollWidth-m.clientWidth,bad:/undefined|\[object Object\]/.test(m.innerText)}));
    if(modal.overflow>1||modal.bad)throw Error(JSON.stringify({width,modal}));
    await page.getByRole('button',{name:'Отмена',exact:true}).click();
+   await page.evaluate(()=>app.navigate('overview'));
+   await page.getByRole('button',{name:'Создать секцию по вопросам',exact:true}).click();
+   await page.getByRole('button',{name:'Далее',exact:true}).click();
+   await page.locator('.at-wizard-name').fill('Проверочная секция');
+   await page.getByRole('button',{name:'Далее',exact:true}).click();
+   const wizard=page.locator('#modal');
+   if(!await wizard.getByText('Для каких сайтов?',{exact:true}).isVisible() || !await page.locator('.at-wizard-domains').isVisible())throw Error('Basic wizard fields are not visible at '+width);
+   if(await page.locator('.at-wizard-devices').isVisible())throw Error('Advanced wizard fields must be hidden initially at '+width);
+   const wizardOverflow=await wizard.evaluate(m=>m.scrollWidth-m.clientWidth);
+   if(wizardOverflow>1)throw Error('Wizard overflows at '+width+': '+wizardOverflow);
+   await page.locator('.at-wizard-advanced > summary').click();
+   if(!await page.locator('.at-wizard-devices').isVisible())throw Error('Advanced wizard settings are unreachable at '+width);
+   await page.locator('.at-wizard-domains').fill('example.org');
+   await page.getByRole('button',{name:'Назад',exact:true}).click();
+   await page.getByRole('button',{name:'Далее',exact:true}).click();
+   if(await page.locator('.at-wizard-domains').inputValue()!=='example.org')throw Error('Wizard lost state after going back at '+width);
+   await page.getByRole('button',{name:'Отмена',exact:true}).click();
    results.push({width,views:8,sectionDialog:'PASS'});
   }
   // A long-lived page must mark real leaf selections, including independent
