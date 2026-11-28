@@ -37,6 +37,11 @@ class BootstrapTests(unittest.TestCase):
         self.assertIsNotNone(match)
         files = ast.literal_eval(match.group(1))
         for relative, expected in files.items():
+            # The existing installer remains pinned to the earlier UI.
+            # The separately available UI-only updater replaces these files.
+            if relative in ('root/www/luci-static/resources/view/atlas/overview.js',
+                            'root/usr/share/luci/menu.d/luci-app-atlas.json'):
+                continue
             with self.subTest(path=relative):
                 content = (ROOT / relative).read_bytes()
                 self.assertEqual(hashlib.sha256(content).hexdigest(), expected)
@@ -44,7 +49,17 @@ class BootstrapTests(unittest.TestCase):
         name = menu['admin/services/atlas']['action']['path'].split('/')[-1] + '.js'
         source = (ROOT / 'root/www/luci-static/resources/view/atlas/overview.js').read_bytes()
         versioned = 'root/www/luci-static/resources/view/atlas/' + name
-        self.assertIn(versioned, files)
+        ui_script = (ROOT / 'tools/install-ui-refresh.py').read_text()
+        ui_files = ast.literal_eval(re.search(r'^FILES = (\(.*?\n\))', ui_script, re.M | re.S).group(1))
+        ui_manifest = dict(ui_files)
+        self.assertIn(versioned, ui_manifest)
+        self.assertEqual(set(ui_manifest), {
+            'root/www/luci-static/resources/view/atlas/overview.js',
+            versioned,
+            'root/usr/share/luci/menu.d/luci-app-atlas.json',
+        })
+        for relative, expected in ui_manifest.items():
+            self.assertEqual(hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), expected)
         self.assertEqual((ROOT / versioned).read_bytes(), source)
         self.assertIn(hashlib.sha256(source).hexdigest()[:8], name)
 
