@@ -447,7 +447,29 @@ return view.extend({
         if(!self.liveSectionsRequest)self.liveSectionsRequest=result(api.sectionDashboard()).catch(function(){return {sections:[]};}).finally(function(){self.liveSectionsRequest=null;});
         return self.liveSectionsRequest;
     },
-    navigate: function(tab) {
+    formSnapshot: function() {
+        var root=this.root, values=[];
+        ['input','textarea','select'].forEach(function(tag){
+            Array.from(root.querySelectorAll(tag)).forEach(function(el){
+                if(el.type==='file')return;
+                values.push([tag,el.type==='checkbox' || el.type==='radio' ? !!el.checked : el.value]);
+            });
+        });
+        return JSON.stringify([values,this.tab==='routing' && this.routingDraftState ? this.routingDraftState() : null]);
+    },
+    navigate: function(tab, discard) {
+        var self=this;
+        if(tab === self.tab && (tab==='routing' || tab==='settings'))return;
+        if(!discard && !self.readonly && (self.tab==='routing' || self.tab==='settings') && self.formBaseline !== self.formSnapshot()) {
+            ui.showModal('Есть несохранённые изменения',[
+                node('p','',label('При переходе в другой раздел введённые изменения будут потеряны.')),
+                node('div','at-actions',[
+                    self.button('Продолжить редактирование',function(){ui.hideModal();},'primary'),
+                    self.button('Уйти без сохранения',function(){ui.hideModal();self.navigate(tab,true);},'ghost')
+                ])
+            ]);
+            return;
+        }
         if (tab !== this.tab) this.sectionDashboardPanel = null;
         if (tab !== 'nodes') this.updateNodeTable = null;
         this.tab = tab;
@@ -490,6 +512,7 @@ return view.extend({
         var saved=self.disclosureState[self.tab] || {};
         atlasDisclosures(self.root).forEach(function(x){if(Object.prototype.hasOwnProperty.call(saved,x.key))x.element.open=saved[x.key];});
         self.renderedTab=self.tab;
+        if(self.tab==='routing' || self.tab==='settings')self.formBaseline=self.formSnapshot();
     },
     sectionDashboard: function() {
         // Status polling redraws the overview. Keep its expanded section panel
@@ -685,7 +708,7 @@ return view.extend({
                     var c = checks[n.key], live=measured[n.key],fresh=liveMeasurementFresh(live,d.settings.auto_interval_seconds);
                     var usage=activeProfiles[n.key],active=!!usage,favorite=d.settings.favorite_profile===n.key;
                     var measurement=node('div','at-measurement',[node('strong','',label('Автопроверка')),pill(live ? !fresh ? 'Замер устарел' : live.ok ? live.latency_ms+' мс' : 'Не прошёл' : 'Нет замера',live && fresh ? live.ok ? 'success at-latency' : 'danger' : 'neutral'),node('small','',label(live ? liveDate(live.checked_at) : n.eligible === false ? 'Профиль исключён фильтрами' : 'Ожидается успешный замер')),c ? node('small','',label('Вручную: '+(c.ok ? c.latency_ms+' мс' : 'не прошёл')+' · '+date(c.checked)),{'title':c.error || ''}) : label('')]);
-                    return node('tr', (active ? 'selected ' : '')+(favorite ? 'favorite' : ''), [node('td', '', [node('div','at-profile-title',[node('strong', '', label(n.name)),active ? pill('Активен','success') : label(''),favorite ? pill('Любимый','purple') : label('')]), node('small', '', label(n.server + ':' + n.port)), node('small','at-profile-meta',label(n.type.toUpperCase()+' · '+(n.country || '—')+' · '+n.subscription)), active ? node('small','at-profile-usage',label(usage.sections.length ? 'Секции: '+usage.sections.join(', ') : usage.sources.join(' · '))) : label(''), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', node('div','at-actions at-profile-actions',[node('div','at-compact-only',self.button('IP выхода',function(){return self.action('geo_check',n.key);},'small',self.busy())),self.button(favorite ? 'Убрать любимый' : '☆ Любимый',function(){return result(api.saveSettings(Object.assign({},self.data.settings,{selected:favorite ? self.data.settings.selected : 'auto',favorite_profile:favorite ? '' : n.key}))).then(function(){return self.data.running ? self.action('apply') : self.reload();}).catch(error);},'small',self.busy() || (!favorite && n.eligible===false)),self.button('В секцию',function(){self.navigate('routing');},'small',self.busy())]))]);
+                    return node('tr', (active ? 'selected ' : '')+(favorite ? 'favorite' : ''), [node('td', '', [node('div','at-profile-title',[node('strong', '', label(n.name)),active ? pill('Активен','success') : label(''),favorite ? pill('Любимый','purple') : label('')]), node('small', '', label(n.server + ':' + n.port)), node('small','at-profile-meta',label(n.type.toUpperCase()+' · '+(n.country || '—')+' · '+n.subscription)), active ? node('small','at-profile-usage',label(usage.sections.length ? 'Секции: '+usage.sections.join(', ') : usage.sources.join(' · '))) : label(''), n.eligible === false ? pill('Исключён фильтром', 'neutral') : label('')]), node('td', '', pill(n.type.toUpperCase(), 'neutral')), node('td', '', [node('strong', '', label(n.country || 'Неизвестна')), node('small', '', label(n.country_source === 'exit-ip' ? 'Проверена по IP · ' + date(n.country_verified_at) : 'Метка провайдера')), self.button('Проверить IP выхода', function() { return self.action('geo_check', n.key); }, 'small', self.busy())]), node('td', '', label(n.subscription)), node('td', '', measurement), node('td', '', node('div','at-actions at-profile-actions',[node('div','at-compact-only',self.button('IP выхода',function(){return self.action('geo_check',n.key);},'small',self.busy())),self.button(favorite ? 'Убрать любимый' : '☆ Любимый',function(){return result(api.saveSettings(Object.assign({},self.data.settings,{selected:favorite ? self.data.settings.selected : 'auto',favorite_profile:favorite ? '' : n.key}))).then(function(){return self.data.running ? self.action('apply') : self.reload();}).catch(error);},'small',self.busy() || (!favorite && n.eligible===false)),self.button('К секциям',function(){self.navigate('routing');},'small',self.busy())]))]);
                 }))]));
             if (!list.length) container.appendChild(!d.nodes.length ? self.empty('Серверов нет', 'Добавьте и обновите подписку.') : !self.showExcludedProfiles && !allowed.length ? self.empty('Все профили исключены фильтрами', 'Измените общие фильтры или включите «Показать все профили».') : self.empty('Ничего не найдено', 'Измените запрос. Поиск идёт среди показанных профилей.'));
         }
@@ -696,7 +719,7 @@ return view.extend({
         var runtime = d.runtime || {};
         return node('div', 'at-content', [self.sectionHead('Доступные серверы', 'Замеры и профили, выбранные вашими секциями.', self.button('Ручная HTTPS-проверка', function() { return self.action('probe'); }, 'primary', self.busy() || !eligible)),
             atlasElement('details',{'class':'at-profile-help'},[atlasElement('summary',{},'О проверках'),node('p','at-footnote',label('Движок проверяет профили с заданным интервалом. Atlas раз в минуту смотрит готовые результаты, а действующий профиль может проверить отдельно перед общей очередью или при пропавшем замере. Ручной тест показан отдельно. Любимый профиль используется в автоматических секциях, где проходит фильтры; при отказе выбирается запасной. Ручной выбор в отдельной секции сохраняется.')),node('p','at-footnote',label('Проверка страны выполняет HTTPS запрос через выбранный профиль к ipapi.co. Сервис видит выходной IP; Atlas сохраняет только код страны и время. При изменении страны фильтры применяются заново; если допустимых серверов нет, туннель останавливается с fail-closed.'))]),
-            node('div', 'at-auto-card', [node('div', '', [node('strong', '', label('Фильтры профилей')), node('p', '', label('Выбор: ' + ({fastest:'по задержке',balanced:'сбалансированный',stable:'стабильный'}[d.settings.auto_strategy] || 'по задержке') + ' · допущено ' + eligible + ' из ' + d.nodes.length)), node('p', '', label('Разрешённые страны: ' + ((d.settings.countries || []).join(', ') || 'все') + ' · исключены: ' + ((d.settings.excluded_countries || []).join(', ') || 'нет') + ' · ' + (d.settings.selected === 'auto' ? 'автоматический режим' : 'ручной выбор') + ' · порог смены: '+d.settings.auto_tolerance_ms+' мс'))]), self.button('Общие фильтры профилей', function() { self.autoDialog(); }, '', self.busy())]),
+            node('div', 'at-auto-card', [node('div', '', [node('strong', '', label('Фильтры профилей')), node('p', '', label('Выбор: ' + ({fastest:'минимальный пинг',slowest:'максимальный пинг',stable:'стабильный'}[d.settings.auto_strategy] || 'по задержке') + ' · допущено ' + eligible + ' из ' + d.nodes.length)), node('p', '', label('Разрешённые страны: ' + ((d.settings.countries || []).join(', ') || 'все') + ' · исключены: ' + ((d.settings.excluded_countries || []).join(', ') || 'нет') + ' · ' + (d.settings.selected === 'auto' ? 'автоматический режим' : 'ручной выбор') + ' · порог смены: '+d.settings.auto_tolerance_ms+' мс'))]), self.button('Общие фильтры профилей', function() { self.autoDialog(); }, '', self.busy())]),
             node('section', 'at-card at-padded at-runtime-summary', [node('h3', '', label('Текущий общий профиль')), node('p', 'at-runtime-name', label(runtime.available && runtime.selected ? runtime.name : runtime.message || 'Данные движка недоступны')), runtime.selected ? node('p', 'at-footnote', label((runtime.automatic || d.settings.selected === 'auto' ? 'Автоматический режим' : 'Вручную') + ' · в активной группе: ' + runtime.candidate_count + (runtime.last_delay_ms ? ' · последний замер: ' + runtime.last_delay_ms + ' мс (' + liveDate(runtime.last_check) + ')' : ''))) : label(''), node('p', 'at-footnote', label('Выбор узла сам по себе не подтверждает доступность соединения. После изменения настроек активная группа обновляется при применении.'))]),
             (runtime.groups || []).length ? node('section', 'at-card at-padded', [node('h3', '', label('Пулы подписок')), node('div', '', (runtime.groups || []).map(function(g) { var sub = d.subscriptions.find(function(x) { return 'pool_' + x.id === g.group; }); return node('p', 'at-footnote', label((sub ? sub.name : g.group) + ': ' + g.name)); }))]) : label(''),
             eligible === 1 ? node('p', 'at-inline-error', label('Фильтры оставили один узел. При его отказе переключаться не на что; другая страна автоматически не добавится.')) : label(''),
@@ -724,7 +747,7 @@ return view.extend({
         var interrupt = node('input', '', [], { type: 'checkbox', checked: !!s.interrupt_connections });
         var msg = node('p', 'at-inline-error');
         ui.showModal('Общие фильтры и проверка профилей', [node('div', 'at-modal', [
-            node('div', 'at-actions', [self.button('Только Эстония', function() { countries.value = 'EE'; }), self.button('Все страны', function() { countries.value = ''; })]),
+            node('div', 'at-actions', [self.button('Все страны', function() { countries.value = ''; })]),
             self.field('Страны', countries, 'Коды стран: EE — Эстония. Проверенная страна IP имеет приоритет над названием провайдера.'),
             self.field('Исключить страны', excludedCountries, 'Например RU. Исключённые страны никогда не попадают в auto пул.'),
             self.field('Предпочесть страны', preferredCountries, 'Порядок важен: EE, DE сначала выберет Эстонию, затем Германию.'),
@@ -1167,6 +1190,7 @@ return view.extend({
 
         var sectionDraft = JSON.parse(JSON.stringify(s.sections || []));
         var sectionListOverrides={},sectionSelections={};
+        self.routingDraftState=function(){return {sections:sectionDraft,lists:sectionListOverrides,choices:sectionSelections};};
         var sectionSources={choice:function(id){return sectionSelections[id];},select:function(id,choice){sectionSelections[id]=choice;},get:function(){return atlasMergeSectionLists(s.remote_lists || [],sectionListOverrides);},set:function(id,items){sectionListOverrides[id]=items;syncSections();}};
         var sectionList = node('div', 'at-section-list');
         var serializedSections = '';
